@@ -59,6 +59,12 @@ function formatClaudeContext(result) {
     sections.push(result.toolOptimizationHint);
   }
 
+  // Output waste feedback — injected when prior response had significant redundancy.
+  // Kept to 3 lines so the feedback itself models terse output.
+  if (result.outputWasteFeedback) {
+    sections.push(`[OUTPUT WASTE]\n${result.outputWasteFeedback}`);
+  }
+
   // Retry context — only when prior failures exist in memory
   if (result.retryBlock) {
     sections.push(`[RETRY CONTEXT]\n${result.retryBlock}`);

@@ -124,6 +124,9 @@ function formatCodexContext(result) {
       proofWith:             proof.estimated_total_tokens_with_optimizer    ?? 0,
       proofSaved:            proof.estimated_total_tokens_saved             ?? 0,
       proofEfficiencyPct:    proof.estimated_efficiency_percent             ?? 0,
+      // V4: Output waste
+      outputWasteTokens:     result.outputWasteStats?.output_tokens_redundant ?? 0,
+      outputWasteReason:     result.outputWasteStats?.top_reason              ?? "none",
     },
   };
 }

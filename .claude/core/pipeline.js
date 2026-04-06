@@ -64,6 +64,10 @@ const { extractSmartMemory }                   = require(path.join(UTILS, "smart
 const { detectTaskShift }                      = require(path.join(UTILS, "memoryDecay.js"));
 const { computeSessionProof, formatProofLine } = require(path.join(UTILS, "proofEngine.js"));
 const { analyzeToolBehavior }                  = require(path.join(UTILS, "toolTracker.js"));
+const {
+  analyzeOutputWaste,
+  formatWasteFeedback,
+}                                              = require(path.join(UTILS, "outputWaste.js"));
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
@@ -189,12 +193,14 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
   }
 
   // ── Step 7: Task-aware output policy ─────────────────────────────────────
-  let outputPolicyBlock = "";
-  let taskType          = "default";
+  let outputPolicyBlock  = "";
+  let taskType           = "default";
+  let policyEstimatedSaved = 0;
   try {
-    const policy   = getOutputPolicy(optimizedTask, isMultiStep);
-    outputPolicyBlock = policy.block;
-    taskType          = policy.taskType;
+    const policy       = getOutputPolicy(optimizedTask, isMultiStep);
+    outputPolicyBlock  = policy.block;
+    taskType           = policy.taskType;
+    policyEstimatedSaved = policy.estimatedSaved ?? 0;
   } catch {
     outputPolicyBlock = "Keep answer concise. Do not repeat context.";
   }
@@ -216,6 +222,21 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     toolPolicyBlock      = toolResult.suppressionBlock;
     toolOptimizationHint = toolResult.optimizationHint;
     toolStats            = toolResult.stats;
+  } catch {
+    // Non-fatal
+  }
+
+  // ── Step 8.5: Output waste analysis ──────────────────────────────────────
+  // Analyze the PREVIOUS turn's assistant response for redundancy patterns.
+  // When waste is detected, formatWasteFeedback() produces a short 3-line block
+  // that is injected into the next turn's context — telling Claude to skip
+  // preamble, repeated context, and unnecessary prose this turn.
+  // Non-fatal: returns empty stats/string when transcript is unavailable.
+  let outputWasteStats    = {};
+  let outputWasteFeedback = "";
+  try {
+    outputWasteStats    = analyzeOutputWaste(transcriptPath, prompt, taskType);
+    outputWasteFeedback = formatWasteFeedback(outputWasteStats);
   } catch {
     // Non-fatal
   }
@@ -245,8 +266,9 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       messagesCompressed,
       cacheHits,
       taskType,
-      lifecycleMode:        lifecycle.mode,
-      lifecycleTokensSaved: lifecycle.estimatedSavedTokens,
+      lifecycleMode:           lifecycle.mode,
+      lifecycleTokensSaved:    lifecycle.estimatedSavedTokens,
+      outputPolicyEstimated:   policyEstimatedSaved,
     });
     savingsLine = formatSavingsBlock(updatedSavings);
   } catch {
@@ -273,6 +295,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       turnStats:      updatedSavings?.turnStats,
       proofStats,
       toolStats,
+      outputWasteStats,
     });
   } catch {}
 
@@ -321,6 +344,10 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
 
     // V2: Smart memory update (for applyUpdates() in the hook)
     smartMemoryUpdate,
+
+    // V4: Output waste analysis (prior response redundancy stats + feedback block)
+    outputWasteStats,
+    outputWasteFeedback,
   };
 }
 

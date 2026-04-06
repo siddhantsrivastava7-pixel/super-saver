@@ -101,6 +101,10 @@ function loadState() {
     tool_suppressed_turns:            0,
     estimated_tool_cost_tokens:       0,   // tokens tool calls would cost (cumulative)
     estimated_suppression_saved:      0,   // tokens saved by suppression (cumulative)
+    // V4: Output waste tracking
+    output_tokens_analyzed:           0,   // total output tokens examined across turns
+    output_tokens_redundant_estimated: 0,  // total estimated redundant output tokens
+    output_waste_turns:               0,   // turns where waste was detected
     session_started:                  new Date().toISOString(),
     last_updated:                     new Date().toISOString(),
   };
@@ -167,7 +171,8 @@ function recordTurn(fields) {
       lifecycleMode  = "normal",
       turnStats,
       proofStats     = {},
-      toolStats      = {},
+      toolStats        = {},
+      outputWasteStats = {},
     } = fields;
 
     // turnStats contains the per-turn deltas from savings.js.
@@ -251,6 +256,13 @@ function recordTurn(fields) {
     state.estimated_tool_cost_tokens  += toolStats.estimated_tool_cost_tokens  ?? 0;
     state.estimated_suppression_saved += toolStats.estimated_suppression_saved ?? 0;
 
+    // V4: Output waste — additive accumulation
+    state.output_tokens_analyzed           += outputWasteStats.output_tokens_total     ?? 0;
+    state.output_tokens_redundant_estimated += outputWasteStats.output_tokens_redundant ?? 0;
+    if (outputWasteStats.has_waste) {
+      state.output_waste_turns = (state.output_waste_turns ?? 0) + 1;
+    }
+
     state.last_updated = new Date().toISOString();
     saveState(state);
 
@@ -298,6 +310,10 @@ function getMetrics() {
       tool_suppressed_turns:              s.tool_suppressed_turns       ?? 0,
       estimated_tool_cost_tokens:         s.estimated_tool_cost_tokens  ?? 0,
       estimated_suppression_saved:        s.estimated_suppression_saved ?? 0,
+      // V4: Output waste
+      output_tokens_analyzed:             s.output_tokens_analyzed              ?? 0,
+      output_tokens_redundant_estimated:  s.output_tokens_redundant_estimated   ?? 0,
+      output_waste_turns:                 s.output_waste_turns                  ?? 0,
       session_started:                    s.session_started,
       last_updated:                       s.last_updated,
     };
