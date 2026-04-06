@@ -7,7 +7,7 @@
   },
   "scripts": {
     "setup": "node setup.js",
-    "test": "node .claude/tests/compression-safety.js && node .claude/tests/file-inference.js && node .claude/tests/adapter-parity.js && node .claude/tests/cache-hit.js && node .claude/tests/lifecycle.js"
+    "test": "node .claude/tests/compression-safety.js && node .claude/tests/file-inference.js && node .claude/tests/adapter-parity.js && node .claude/tests/cache-hit.js && node .claude/tests/lifecycle.js && node .claude/tests/savings-aggregation.js"
   },
   "keywords": ["claude", "codex", "token", "optimization", "hook", "llm"],
   "license": "MIT",

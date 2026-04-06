@@ -14,7 +14,11 @@
       "Bash(gh auth:*)",
       "Bash(gh repo:*)",
       "Bash(node .claude/tests/cache-hit.js)",
-      "Bash(node .claude/tests/lifecycle.js)"
+      "Bash(node .claude/tests/lifecycle.js)",
+      "Bash(mkdir -p /tmp/test-project)",
+      "Bash(node \"C:\\\\Users\\\\siddh\\\\OneDrive\\\\Desktop\\\\Super Saver\\\\setup.js\" --target /tmp/test-project)",
+      "Bash(node \"C:\\\\Users\\\\siddh\\\\OneDrive\\\\Desktop\\\\Super Saver\\\\setup.js\" --target /tmp/test-project --codex)",
+      "Bash(node .claude/tests/savings-aggregation.js)"
     ]
   }
 }

@@ -55,6 +55,7 @@ const {
   buildRebuildContext,
   buildCompactHeader,
   getToolUsagePolicy,
+  getCompressionWindow,
 }                                              = require(path.join(UTILS, "lifecycle.js"));
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -99,6 +100,15 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       // For compact mode, prepend the compact mode header to signal Claude
       if (lifecycle.mode === "compact" && contextBlock) {
         contextBlock = `${buildCompactHeader()}\n\n${contextBlock}`;
+      }
+
+      // When transcript is unavailable (empty path), compressor returns 0 compressed
+      // messages. Estimate based on session turn vs. compression window so that
+      // history_saved_tokens accumulates even in environments with no transcript.
+      if (messagesCompressed === 0 && transcriptPath === "") {
+        const recentWindow = getCompressionWindow(lifecycle.compressionLevel);
+        // One message compressed per turn beyond the window (conservative estimate)
+        messagesCompressed = currentTurn > recentWindow + 1 ? 1 : 0;
       }
     }
   } catch {

@@ -71,23 +71,24 @@ function loadState() {
     }
   } catch {}
   return {
-    prompts_processed:            0,
-    cache_hits:                   0,
-    cache_misses:                 0,
-    total_estimated_saved_tokens: 0,
-    savings_pct_sum:              0,
+    prompts_processed:                0,
+    cache_hits:                       0,
+    cache_misses:                     0,
+    total_estimated_saved_tokens:     0,
+    total_tokens_processed_estimate:  0,
+    savings_pct_sum:                  0,
     // Breakdown totals
-    prompt_saved_tokens:          0,
-    history_saved_tokens:         0,
-    read_cache_saved_tokens:      0,
-    output_policy_saved_tokens:   0,
-    lifecycle_saved_tokens:       0,
+    prompt_saved_tokens:              0,
+    history_saved_tokens:             0,
+    read_cache_saved_tokens:          0,
+    output_policy_saved_tokens:       0,
+    lifecycle_saved_tokens:           0,
     // Lifecycle mode counters
-    lifecycle_normal_turns:       0,
-    lifecycle_compact_turns:      0,
-    lifecycle_rebuild_turns:      0,
-    session_started:              new Date().toISOString(),
-    last_updated:                 new Date().toISOString(),
+    lifecycle_normal_turns:           0,
+    lifecycle_compact_turns:          0,
+    lifecycle_rebuild_turns:          0,
+    session_started:                  new Date().toISOString(),
+    last_updated:                     new Date().toISOString(),
   };
 }
 
@@ -205,12 +206,14 @@ function recordTurn(fields) {
     state.cache_misses                 += cacheMisses;
     state.total_estimated_saved_tokens  = nowSaved;
     state.savings_pct_sum              += turnPct;
-    // Sync breakdown totals from updatedSavings
-    state.prompt_saved_tokens          = updatedSavings?.prompt_saved_tokens         || state.prompt_saved_tokens         || 0;
-    state.history_saved_tokens         = updatedSavings?.history_saved_tokens        || state.history_saved_tokens        || 0;
-    state.read_cache_saved_tokens      = updatedSavings?.read_cache_saved_tokens     || state.read_cache_saved_tokens     || 0;
-    state.output_policy_saved_tokens   = updatedSavings?.output_policy_saved_tokens  || state.output_policy_saved_tokens  || 0;
-    state.lifecycle_saved_tokens       = updatedSavings?.lifecycle_saved_tokens      || state.lifecycle_saved_tokens      || 0;
+    // Sync breakdown totals from updatedSavings.
+    // Use ?? not || so a legitimate 0 doesn't fall back to the stale state value.
+    state.prompt_saved_tokens          = updatedSavings?.prompt_saved_tokens         ?? state.prompt_saved_tokens         ?? 0;
+    state.history_saved_tokens         = updatedSavings?.history_saved_tokens        ?? state.history_saved_tokens        ?? 0;
+    state.read_cache_saved_tokens      = updatedSavings?.read_cache_saved_tokens     ?? state.read_cache_saved_tokens     ?? 0;
+    state.output_policy_saved_tokens   = updatedSavings?.output_policy_saved_tokens  ?? state.output_policy_saved_tokens  ?? 0;
+    state.lifecycle_saved_tokens       = updatedSavings?.lifecycle_saved_tokens      ?? state.lifecycle_saved_tokens      ?? 0;
+    state.total_tokens_processed_estimate = updatedSavings?.total_tokens_processed_estimate ?? state.total_tokens_processed_estimate ?? 0;
     // Increment lifecycle mode counter for this turn
     if (lifecycleMode === "rebuild")      state.lifecycle_rebuild_turns = (state.lifecycle_rebuild_turns || 0) + 1;
     else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns || 0) + 1;
@@ -239,12 +242,13 @@ function getMetrics() {
       average_estimated_savings_percent:  n > 0
         ? Math.round(s.savings_pct_sum / n)
         : 0,
+      total_tokens_processed_estimate:    s.total_tokens_processed_estimate ?? 0,
       // Breakdown
-      prompt_saved_tokens:                s.prompt_saved_tokens         || 0,
-      history_saved_tokens:               s.history_saved_tokens        || 0,
-      read_cache_saved_tokens:            s.read_cache_saved_tokens     || 0,
-      output_policy_saved_tokens:         s.output_policy_saved_tokens  || 0,
-      lifecycle_saved_tokens:             s.lifecycle_saved_tokens      || 0,
+      prompt_saved_tokens:                s.prompt_saved_tokens         ?? 0,
+      history_saved_tokens:               s.history_saved_tokens        ?? 0,
+      read_cache_saved_tokens:            s.read_cache_saved_tokens     ?? 0,
+      output_policy_saved_tokens:         s.output_policy_saved_tokens  ?? 0,
+      lifecycle_saved_tokens:             s.lifecycle_saved_tokens      ?? 0,
       // Lifecycle mode distribution
       lifecycle_normal_turns:             s.lifecycle_normal_turns      || 0,
       lifecycle_compact_turns:            s.lifecycle_compact_turns     || 0,
