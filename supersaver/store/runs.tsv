@@ -1,0 +1,5 @@
+timestamp	iteration	model	mode	task_type	result	originalTokens	optimizedTokens	savingsPercent	verificationPassed	notes
+2026-04-06T18:26:05.362Z	1	claude	plan	bug_fix	failure	9	196	0.0	false	High ambiguity overrides default routing (was: codex/execute). Claude will surface assumptions.
+2026-04-06T18:26:45.473Z	2	claude	plan	bug_fix	failure	119	126	0.0	false	High ambiguity overrides default routing (was: codex/execute). Claude will surface assumptions.
+2026-04-06T18:26:57.181Z	3	codex	execute	test_write	failure	138	134	2.9	false	Test generation is structured and pattern-based; optimal for Codex execute mode
+2026-04-06T18:27:02.383Z	4	claude	plan	architecture	failure	172	167	2.9	false	Broad context + deep reasoning overrides table — Claude required regardless of task type

@@ -1,0 +1,37 @@
+{
+  "name": "supersaver",
+  "version": "0.1.0",
+  "description": "Dual-model optimization layer for Claude and Codex — reduces tokens, routes tasks, compresses memory",
+  "main": "dist/apps/cli.js",
+  "bin": {
+    "supersaver": "./dist/apps/cli.js"
+  },
+  "scripts": {
+    "bootstrap": "node -e \"const fs=require('fs'),path=require('path');const dir=path.join(__dirname,'store');fs.mkdirSync(dir,{recursive:true});const sj=path.join(dir,'session.json');if(!fs.existsSync(sj))fs.writeFileSync(sj,JSON.stringify({goal:'',current_task:'',constraints:[],touched_files:[],relevant_files:[],known_failures:[],last_plan:'',iteration:0,last_updated:new Date().toISOString()},null,2));const rt=path.join(dir,'runs.tsv');if(!fs.existsSync(rt))fs.writeFileSync(rt,'');\"",
+    "build": "npm run bootstrap && tsc --project tsconfig.json",
+    "dev": "ts-node apps/cli.ts",
+    "start": "node dist/apps/cli.js",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});console.log('dist/ cleaned');\""
+  },
+  "dependencies": {
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/yargs": "^17.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "llm",
+    "claude",
+    "codex",
+    "token-optimization",
+    "ai-router",
+    "prompt-optimization"
+  ],
+  "license": "MIT"
+}

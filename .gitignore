@@ -1,0 +1,15 @@
+# Session state — local only, never commit
+.claude/hooks/.session-memory.json
+
+# Telemetry logs — local only
+.claude/logs/
+
+# Compiled CLI output
+supersaver/dist/
+supersaver/node_modules/
+
+# Runtime artifacts
+*.log
+*.tmp
+hook-test-input.json
+hook-test-output.json

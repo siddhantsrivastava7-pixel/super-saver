@@ -1,0 +1,53 @@
+# .codex/config.toml
+#
+# SUPER SAVER — Codex CLI Integration Configuration
+#
+# ─── ASSUMPTION NOTICE ──────────────────────────────────────────────────────
+# The OpenAI Codex CLI (https://github.com/openai/codex) does not currently
+# expose an official hook system. This config follows a likely-stable
+# convention and should be adjusted to match your installed CLI version.
+#
+# If your Codex CLI uses a different hook mechanism, see:
+#   .codex/hooks/pre_prompt.js  — adapt extractInput() and emit()
+#   .codex/hooks/post_turn.js   — adapt extractTurnResult()
+#
+# The SUPER SAVER pipeline logic (core/pipeline.js, adapters/codex.js) does
+# NOT need to change — only the I/O wrapper functions need adjustment.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[model]
+# Model name passed to the Codex API endpoint
+name    = "gpt-4o"
+timeout = 30          # seconds; hook timeout should be less than this
+
+[hooks]
+# pre_prompt:  fires before each user turn; receives JSON on stdin
+#              should write { system_prompt, user_prompt, metadata } to stdout
+pre_prompt = "node .codex/hooks/pre_prompt.js"
+
+# post_turn:   fires after each assistant turn; receives turn JSON on stdin
+#              no stdout required (exit 0 = success)
+post_turn  = "node .codex/hooks/post_turn.js"
+
+[hooks.timeout]
+# Individual hook timeout in seconds (default: 8s)
+# Set lower than [model].timeout to ensure hooks never block the main call
+pre_prompt = 8
+post_turn  = 5
+
+[memory]
+# Session memory is shared with the Claude adapter via the same file.
+# Both hooks read/write this path so context carries across adapter switches.
+session_file = ".claude/hooks/.session-memory.json"
+
+[telemetry]
+enabled  = true
+log_file = ".claude/logs/telemetry.jsonl"
+state_file = ".claude/logs/telemetry-state.json"
+
+[optimization]
+# Mirror of the Claude pipeline settings for documentation clarity.
+# Actual values are controlled in .claude/core/pipeline.js and utils/.
+max_file_contexts    = 5    # max files inferred per turn
+max_full_reads       = 2    # max files warranting a full read suggestion
+max_excerpt_summaries = 3   # max compact file summaries per turn

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node dist/apps/cli.js run \"fix authentication bug in login.ts\")",
+      "Bash(echo '{\"\"\"\"prompt\"\"\"\":\"\"\"\"hey can you maybe fix this login thing its kinda broken\"\"\"\",\"\"\"\"session_id\"\"\"\":\"\"\"\"test-1\"\"\"\",\"\"\"\"cwd\"\"\"\":\"\"\"\"C:\\\\\\\\Users\\\\\\\\siddh\\\\\\\\OneDrive\\\\\\\\Desktop\\\\\\\\Super Saver\"\"\"\",\"\"\"\"transcript_path\"\"\"\":\"\"\"\"\"\"\"\",\"\"\"\"hook_event_name\"\"\"\":\"\"\"\"UserPromptSubmit\"\"\"\"}')",
+      "Bash(node .claude/hooks/beforePrompt.js)",
+      "Bash(node -e \":*)",
+      "Bash(node .claude/tests/adapter-parity.js)",
+      "Bash(node .claude/tests/compression-safety.js)",
+      "Bash(node .claude/tests/file-inference.js)",
+      "Bash(gh auth:*)"
+    ]
+  }
+}
