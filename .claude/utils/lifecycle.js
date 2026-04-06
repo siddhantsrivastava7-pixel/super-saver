@@ -36,6 +36,8 @@
 const fs   = require("fs");
 const path = require("path");
 
+const { buildStructuredRebuildContext } = require(path.join(__dirname, "smartMemory.js"));
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // If > 5 minutes have elapsed since the last turn, the model's cache has
@@ -155,53 +157,28 @@ function detectLifecycleState(memory, currentTurn) {
 // ─── Context Builders ─────────────────────────────────────────────────────────
 
 /**
- * Build a minimal context block for rebuild mode.
+ * Build a structured context block for rebuild mode.
  *
- * Replaces full history compression entirely when an idle gap is detected.
- * Extracts only essential, durable state from memory — no stale turns, no
- * redundant back-and-forth, no cached intermediate states.
+ * Delegates to smartMemory.buildStructuredRebuildContext() which produces a
+ * full Goal → Decisions → Constraints → Known Issues → Files block using
+ * the V2 structured memory fields. Falls back to a minimal block if
+ * smartMemory is unavailable.
  *
- * Rules enforced here (matching the spec):
- *   - DO NOT include full past conversation
- *   - DO NOT include redundant turns
- *   - DO NOT include stale retries
- *
- * @param {object} memory - loaded session memory
+ * @param {object} memory - loaded session memory (v2 schema with v3 fields)
  * @returns {string}
  */
 function buildRebuildContext(memory) {
-  const lines = ["[SESSION REBUILD]"];
-
-  if (memory.goal) {
-    lines.push(`Goal: ${memory.goal}`);
+  try {
+    return buildStructuredRebuildContext(memory);
+  } catch {
+    // Graceful fallback — basic block using only v1 fields
+    const lines = ["[SESSION REBUILD]"];
+    if (memory.goal)         lines.push(`Goal: ${memory.goal}`);
+    if (memory.current_task) lines.push(`Current Task: ${memory.current_task}`);
+    if (memory.last_summary) lines.push(`\nLast Summary: ${memory.last_summary}`);
+    if (lines.length === 1)  lines.push("(resuming session)");
+    return lines.join("\n");
   }
-  if (memory.current_task && memory.current_task !== memory.goal) {
-    lines.push(`Current Task: ${memory.current_task}`);
-  }
-
-  lines.push("\nKey Context:");
-
-  if (memory.last_summary) {
-    lines.push(`* ${memory.last_summary}`);
-  }
-  if (memory.last_successful_pattern) {
-    lines.push(`* Last successful pattern: ${memory.last_successful_pattern}`);
-  }
-  if (!memory.last_summary && !memory.last_successful_pattern) {
-    lines.push("* (resuming session — no prior summary available)");
-  }
-
-  if (memory.constraints && memory.constraints.length > 0) {
-    lines.push("\nConstraints:");
-    memory.constraints.forEach((c) => lines.push(`* ${c}`));
-  }
-
-  if (memory.recent_files && memory.recent_files.length > 0) {
-    lines.push("\nRecent Files:");
-    memory.recent_files.slice(-5).forEach((f) => lines.push(`* ${f}`));
-  }
-
-  return lines.join("\n");
 }
 
 /**

@@ -24,7 +24,10 @@
  *   "goal": "",             // First prompt, used as session anchor
  *   "current_task": "",     // Most recent prompt
  *   "last_summary": "",     // One-line summary of last assistant action
- *   "constraints": [],      // User-set constraints (populated externally)
+ *   "constraints": [],      // User-stated rules / limits (smart memory)
+ *   "decisions": [],        // Architectural/approach decisions (smart memory)
+ *   "known_issues": [],     // Errors and problems mentioned (smart memory)
+ *   "important_files": [],  // Files explicitly referenced (smart memory)
  *   "recent_files": [],     // Last 10 files touched (strings)
  *   "known_failures": [],   // Last 5 failure records
  *   "last_verification_command": "",
@@ -65,9 +68,13 @@ function defaultMemory() {
     goal: "",
     current_task: "",
     last_summary: "",
-    constraints: [],
-    recent_files: [],
-    known_failures: [],
+    // V2 Smart Memory fields
+    constraints:      [],   // User-stated rules/limits
+    decisions:        [],   // Architectural/approach decisions
+    known_issues:     [],   // Errors and problems mentioned
+    important_files:  [],   // Files explicitly referenced in prompts
+    recent_files:     [],
+    known_failures:   [],
     last_verification_command: "",
     last_verification_result: "",
     last_successful_pattern: "",
@@ -210,6 +217,33 @@ function applyUpdates(mem, updates) {
     mem.last_turn_timestamp = Date.now();
     mem.idle_gap_ms         = updates.lifecycleState.idleGapMs  || 0;
     mem.session_mode        = updates.lifecycleState.mode       || "normal";
+  }
+
+  // V2: Smart memory — merge extracted facts into bounded arrays.
+  // Each category is deduplicated and capped; new entries are appended
+  // (most-recent-wins ordering) by cappedPush.
+  if (updates.smartMemoryUpdate) {
+    const sm = updates.smartMemoryUpdate;
+    if (Array.isArray(sm.decisions)) {
+      for (const d of sm.decisions) {
+        mem.decisions = cappedPush(mem.decisions ?? [], d, 8);
+      }
+    }
+    if (Array.isArray(sm.constraints)) {
+      for (const c of sm.constraints) {
+        mem.constraints = cappedPush(mem.constraints ?? [], c, 6);
+      }
+    }
+    if (Array.isArray(sm.known_issues)) {
+      for (const i of sm.known_issues) {
+        mem.known_issues = cappedPush(mem.known_issues ?? [], i, 5);
+      }
+    }
+    if (Array.isArray(sm.important_files)) {
+      for (const f of sm.important_files) {
+        mem.important_files = cappedPush(mem.important_files ?? [], f, 10);
+      }
+    }
   }
 
   return mem;

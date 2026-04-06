@@ -54,6 +54,11 @@ function formatClaudeContext(result) {
     sections.push(result.toolPolicyBlock);
   }
 
+  // Tool optimization hint — only when repeated file reads are detected
+  if (result.toolOptimizationHint) {
+    sections.push(result.toolOptimizationHint);
+  }
+
   // Retry context — only when prior failures exist in memory
   if (result.retryBlock) {
     sections.push(`[RETRY CONTEXT]\n${result.retryBlock}`);
@@ -64,9 +69,11 @@ function formatClaudeContext(result) {
     sections.push(`[VERIFICATION]\n${result.verificationSuggestion}`);
   }
 
-  // Savings line — only after 2+ prompts (nothing to compare on turn 1)
-  if (result.savingsLine) {
-    sections.push(`[SUPER SAVER]\n${result.savingsLine}`);
+  // Savings + proof — only after 2+ prompts (nothing to compare on turn 1)
+  // proofLine provides the cleaner "before vs after" framing when available.
+  const statsContent = result.proofLine || result.savingsLine;
+  if (statsContent) {
+    sections.push(`[SUPER SAVER]\n${statsContent}`);
   }
 
   return sections.join("\n\n");

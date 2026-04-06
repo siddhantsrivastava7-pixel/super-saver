@@ -12,13 +12,17 @@
  * Only the final rendering differs between adapters.
  *
  * Step map:
- *   3. Compress conversation history
- *   4. Optimize the prompt (filler removal + structuring)
- *   5. Filter relevant files (keyword inference or explicit mention)
- *   6. Apply read optimization policy (registry-based dedup)
- *   7. Classify task type + get output policy rules
- *   8. Inject retry/failure context if applicable
- *   9. Estimate and accumulate token savings
+ *   2b. Lifecycle state detection
+ *   2c. Smart memory extraction
+ *   3.  Compress conversation history (or structured rebuild context)
+ *   4.  Optimize the prompt (filler removal + structuring)
+ *   5.  Filter relevant files (keyword inference or explicit mention)
+ *   6.  Apply read optimization policy (registry-based dedup)
+ *   7.  Classify task type + get output policy rules
+ *   8.  Tool awareness policy (suppression + optimization hint)
+ *   9.  Inject retry/failure context if applicable
+ *   10. Estimate and accumulate token savings
+ *   11. Proof engine (before vs after estimates)
  *
  * @param {{
  *   prompt:         string,   — trimmed user prompt
@@ -54,9 +58,11 @@ const {
   detectLifecycleState,
   buildRebuildContext,
   buildCompactHeader,
-  getToolUsagePolicy,
   getCompressionWindow,
 }                                              = require(path.join(UTILS, "lifecycle.js"));
+const { extractSmartMemory }                   = require(path.join(UTILS, "smartMemory.js"));
+const { computeSessionProof, formatProofLine } = require(path.join(UTILS, "proofEngine.js"));
+const { analyzeToolBehavior }                  = require(path.join(UTILS, "toolTracker.js"));
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +79,17 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     lifecycle = detectLifecycleState(memory, currentTurn);
   } catch {
     // Non-fatal — proceed with defaults
+  }
+
+  // ── Step 2c: Smart memory extraction ─────────────────────────────────────
+  // Extract structured facts from the current prompt for memory persistence.
+  // These are returned as smartMemoryUpdate and persisted by the hook via
+  // applyUpdates() — pipeline.js itself does not mutate memory.
+  let smartMemoryUpdate = { decisions: [], constraints: [], known_issues: [], important_files: [] };
+  try {
+    smartMemoryUpdate = extractSmartMemory(prompt);
+  } catch {
+    // Non-fatal — proceed without smart memory this turn
   }
 
   // ── Step 3: Compress history ─────────────────────────────────────────────
@@ -165,18 +182,36 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
   // ── Step 7: Task-aware output policy ─────────────────────────────────────
   let outputPolicyBlock = "";
   let taskType          = "default";
-  let toolPolicyBlock   = "";
   try {
     const policy   = getOutputPolicy(optimizedTask, isMultiStep);
     outputPolicyBlock = policy.block;
     taskType          = policy.taskType;
-    // Tool usage policy — only for lightweight tasks where tool calls waste tokens
-    toolPolicyBlock = getToolUsagePolicy(taskType);
   } catch {
     outputPolicyBlock = "Keep answer concise. Do not repeat context.";
   }
 
-  // ── Step 8: Retry / failure context ──────────────────────────────────────
+  // ── Step 8: Tool awareness policy ────────────────────────────────────────
+  // Replaces the simpler getToolUsagePolicy() from lifecycle.js.
+  // Adds repeated-read detection on top of task-type suppression.
+  let toolPolicyBlock      = "";
+  let toolOptimizationHint = "";
+  let toolStats            = {};
+  try {
+    const toolResult     = analyzeToolBehavior({
+      taskType,
+      readRegistry:  updatedRegistry,
+      relevantFiles,
+      cacheHits,
+      currentTurn,
+    });
+    toolPolicyBlock      = toolResult.suppressionBlock;
+    toolOptimizationHint = toolResult.optimizationHint;
+    toolStats            = toolResult.stats;
+  } catch {
+    // Non-fatal
+  }
+
+  // ── Step 9: Retry / failure context ──────────────────────────────────────
   let retryBlock             = "";
   let verificationSuggestion = "";
   try {
@@ -191,7 +226,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // Non-fatal
   }
 
-  // ── Step 9: Estimate savings ─────────────────────────────────────────────
+  // ── Step 10: Estimate savings ────────────────────────────────────────────
   let updatedSavings = memory.savings;
   let savingsLine    = "";
   try {
@@ -209,15 +244,26 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // Non-fatal — carry forward existing savings
   }
 
+  // ── Step 11: Proof engine ─────────────────────────────────────────────────
+  // Compute before/after token estimates for display and telemetry.
+  let proofStats   = {};
+  let proofLine    = "";
+  try {
+    proofStats = computeSessionProof(updatedSavings);
+    proofLine  = formatProofLine(proofStats);
+  } catch {
+    // Non-fatal
+  }
+
   // ── Telemetry (non-fatal, side-effect by design) ─────────────────────────
-  // Telemetry is the one deliberate side effect inside runPipeline.
-  // It writes to .claude/logs/ so observability survives process restarts.
   try {
     recordTurn({
       taskType, originalChars, optimizedChars, cacheHits,
       relevantFiles, updatedSavings,
       lifecycleMode: lifecycle.mode,
-      turnStats: updatedSavings?.turnStats,
+      turnStats:     updatedSavings?.turnStats,
+      proofStats,
+      toolStats,
     });
   } catch {}
 
@@ -247,8 +293,9 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     retryBlock,
     verificationSuggestion,
 
-    // Tool policy (for adapter rendering)
+    // V2: Tool awareness (suppressionBlock + optimization hint)
     toolPolicyBlock,
+    toolOptimizationHint,
 
     // Lifecycle state (for memory persistence + adapter rendering)
     lifecycleState: lifecycle,
@@ -258,6 +305,13 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     cacheHits,
     updatedSavings,
     savingsLine,
+
+    // V2: Proof engine (before/after estimates)
+    proofStats,
+    proofLine,
+
+    // V2: Smart memory update (for applyUpdates() in the hook)
+    smartMemoryUpdate,
   };
 }
 

@@ -87,6 +87,16 @@ function loadState() {
     lifecycle_normal_turns:           0,
     lifecycle_compact_turns:          0,
     lifecycle_rebuild_turns:          0,
+    // V2: Proof engine (before vs after, derived from savings — additive)
+    estimated_total_tokens_without_optimizer: 0,
+    estimated_total_tokens_with_optimizer:    0,
+    estimated_total_tokens_saved:             0,
+    estimated_efficiency_percent:             0,
+    // V2: Tool tracker (additive per-turn accumulation)
+    tool_calls_estimate:              0,
+    file_reads_estimate:              0,
+    redundant_reads_estimate:         0,
+    tool_suppressed_turns:            0,
     session_started:                  new Date().toISOString(),
     last_updated:                     new Date().toISOString(),
   };
@@ -151,6 +161,8 @@ function recordTurn(fields) {
       relevantFiles = [],
       lifecycleMode = "normal",
       turnStats,
+      proofStats  = {},
+      toolStats   = {},
     } = fields;
 
     // turnStats contains the per-turn deltas from savings.js.
@@ -207,6 +219,24 @@ function recordTurn(fields) {
     if (lifecycleMode === "rebuild")      state.lifecycle_rebuild_turns = (state.lifecycle_rebuild_turns ?? 0) + 1;
     else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns ?? 0) + 1;
     else                                  state.lifecycle_normal_turns  = (state.lifecycle_normal_turns  ?? 0) + 1;
+
+    // V2: Proof engine — sync from latest session proof (not additive —
+    // these are derived fields that always reflect the latest computed values)
+    if (proofStats && typeof proofStats.estimated_total_tokens_without_optimizer === "number") {
+      state.estimated_total_tokens_without_optimizer = proofStats.estimated_total_tokens_without_optimizer;
+      state.estimated_total_tokens_with_optimizer    = proofStats.estimated_total_tokens_with_optimizer;
+      state.estimated_total_tokens_saved             = proofStats.estimated_total_tokens_saved;
+      state.estimated_efficiency_percent             = proofStats.estimated_efficiency_percent;
+    }
+
+    // V2: Tool tracker — additive per-turn accumulation
+    state.tool_calls_estimate     += toolStats.tool_calls_estimate  ?? 0;
+    state.file_reads_estimate     += toolStats.file_reads_this_turn ?? 0;
+    state.redundant_reads_estimate += toolStats.redundant_reads     ?? 0;
+    if (toolStats.is_suppressed) {
+      state.tool_suppressed_turns = (state.tool_suppressed_turns ?? 0) + 1;
+    }
+
     state.last_updated = new Date().toISOString();
     saveState(state);
 
@@ -239,9 +269,19 @@ function getMetrics() {
       output_policy_saved_tokens:         s.output_policy_saved_tokens  ?? 0,
       lifecycle_saved_tokens:             s.lifecycle_saved_tokens      ?? 0,
       // Lifecycle mode distribution
-      lifecycle_normal_turns:             s.lifecycle_normal_turns      || 0,
-      lifecycle_compact_turns:            s.lifecycle_compact_turns     || 0,
-      lifecycle_rebuild_turns:            s.lifecycle_rebuild_turns     || 0,
+      lifecycle_normal_turns:             s.lifecycle_normal_turns      ?? 0,
+      lifecycle_compact_turns:            s.lifecycle_compact_turns     ?? 0,
+      lifecycle_rebuild_turns:            s.lifecycle_rebuild_turns     ?? 0,
+      // V2: Proof engine
+      estimated_total_tokens_without_optimizer: s.estimated_total_tokens_without_optimizer ?? 0,
+      estimated_total_tokens_with_optimizer:    s.estimated_total_tokens_with_optimizer    ?? 0,
+      estimated_total_tokens_saved:             s.estimated_total_tokens_saved             ?? 0,
+      estimated_efficiency_percent:             s.estimated_efficiency_percent             ?? 0,
+      // V2: Tool tracker
+      tool_calls_estimate:                s.tool_calls_estimate     ?? 0,
+      file_reads_estimate:                s.file_reads_estimate     ?? 0,
+      redundant_reads_estimate:           s.redundant_reads_estimate ?? 0,
+      tool_suppressed_turns:              s.tool_suppressed_turns   ?? 0,
       session_started:                    s.session_started,
       last_updated:                       s.last_updated,
     };

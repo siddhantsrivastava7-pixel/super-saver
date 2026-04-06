@@ -90,11 +90,12 @@ async function main() {
   // ── Step 10: Persist memory ───────────────────────────────────────────────
   try {
     applyUpdates(memory, {
-      prompt:          trimmedPrompt,
-      files:           result.relevantFiles,
-      updatedRegistry: result.updatedRegistry,
-      updatedSavings:  result.updatedSavings,
-      lifecycleState:  result.lifecycleState,
+      prompt:            trimmedPrompt,
+      files:             result.relevantFiles,
+      updatedRegistry:   result.updatedRegistry,
+      updatedSavings:    result.updatedSavings,
+      lifecycleState:    result.lifecycleState,
+      smartMemoryUpdate: result.smartMemoryUpdate,
     });
     saveMemory(memory);
   } catch {
