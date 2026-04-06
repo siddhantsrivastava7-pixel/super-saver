@@ -26,6 +26,14 @@ const path = require("path");
 const { hashFile } = require("./fileHasher.js");
 
 const MAX_REGISTRY_SIZE = 20;
+
+/**
+ * Normalize a file path to a consistent key for registry lookups.
+ * Uses forward slashes on all platforms to prevent Windows backslash mismatches.
+ */
+function normalizePath(p) {
+  return path.resolve(p).replace(/\\/g, "/");
+}
 const MAX_SUMMARY_CHARS = 220;
 
 // ─── Symbol Extraction ────────────────────────────────────────────────────────
@@ -128,12 +136,12 @@ function extractSummary(filePath, content) {
  * }}
  */
 function getFileStatus(filePath, registry) {
-  const absPath = path.resolve(filePath);
+  const absPath = normalizePath(filePath);
   const { hash, content, sizeBytes } = hashFile(absPath);
 
   if (!hash) return { status: "error", entry: null, content: null, hash: null, sizeBytes: 0 };
 
-  // Look up by absolute path (primary) or original path (fallback)
+  // Look up by normalized absolute path (primary) or original path (fallback)
   const existing = registry[absPath] ?? registry[filePath] ?? null;
 
   if (!existing) {
@@ -161,7 +169,7 @@ function getFileStatus(filePath, registry) {
  * @returns {object}          - The new/updated entry
  */
 function registerFile(filePath, content, hash, registry, turn, sizeBytes = 0) {
-  const absPath = path.resolve(filePath);
+  const absPath = normalizePath(filePath);
 
   // Evict if at capacity (keep newest N-1, add this new one)
   const keys = Object.keys(registry);
@@ -229,4 +237,5 @@ module.exports = {
   extractSummary,
   extractSymbols,
   getChangedSectionsSummary,
+  normalizePath,
 };

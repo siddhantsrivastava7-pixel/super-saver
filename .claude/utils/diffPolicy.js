@@ -37,8 +37,21 @@
 
 "use strict";
 
+const fs   = require("fs");
 const path = require("path");
-const { getFileStatus, registerFile, getChangedSectionsSummary } = require("./readRegistry.js");
+const { getFileStatus, registerFile, getChangedSectionsSummary, normalizePath } = require("./readRegistry.js");
+
+// ─── Debug Logging ────────────────────────────────────────────────────────────
+
+const DEBUG_LOG = path.resolve(__dirname, "../logs/registry-debug.log");
+
+function debugLog(msg) {
+  try {
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    fs.mkdirSync(path.dirname(DEBUG_LOG), { recursive: true });
+    fs.appendFileSync(DEBUG_LOG, line);
+  } catch {}
+}
 
 // ─── Budget Constants ─────────────────────────────────────────────────────────
 
@@ -185,11 +198,13 @@ function applyReadPolicy(files, registry, cwd, turn, explicitRead = false) {
   let cacheChanges   = 0;
 
   for (const file of files) {
-    const absPath = path.isAbsolute(file) ? file : path.resolve(cwd, file);
+    const absPath = normalizePath(path.isAbsolute(file) ? file : path.resolve(cwd, file));
     const relPath = path.relative(cwd, absPath).replace(/\\/g, "/");
 
     const { status, entry, content, hash, sizeBytes } =
       getFileStatus(absPath, updatedRegistry);
+
+    debugLog(`file=${relPath} absPath=${absPath} status=${status} registryKeys=${Object.keys(updatedRegistry).length}`);
 
     // ── explicitRead bypasses budget caps ──
     const budgetExhausted =

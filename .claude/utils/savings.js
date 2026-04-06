@@ -60,20 +60,30 @@ function computePromptSavings(originalChars, optimizedChars) {
  *
  * @param {object} currentSavings  - memory.savings (may be undefined on first run)
  * @param {{
- *   originalChars: number,
- *   optimizedChars: number,
- *   messagesCompressed: number,
- *   cacheHits: number,
+ *   originalChars:         number,
+ *   optimizedChars:        number,
+ *   messagesCompressed:    number,
+ *   cacheHits:             number,
+ *   taskType?:             string,
+ *   lifecycleMode?:        "normal"|"compact"|"rebuild",
+ *   lifecycleTokensSaved?: number,
  * }} stats
  * @returns {object} Updated savings object
  */
 function updateSavings(currentSavings, stats) {
   const s = currentSavings ?? {
-    prompts_processed: 0,
+    prompts_processed:            0,
     total_estimated_saved_tokens: 0,
-    total_original_tokens: 0,
-    total_optimized_tokens: 0,
-    total_cache_hits: 0,
+    total_original_tokens:        0,
+    total_optimized_tokens:       0,
+    total_cache_hits:             0,
+    // Breakdown totals
+    prompt_saved_tokens:          0,
+    history_saved_tokens:         0,
+    read_cache_saved_tokens:      0,
+    output_policy_saved_tokens:   0,
+    lifecycle_saved_tokens:       0,
+    lifecycle_mode:               "normal",
   };
 
   const { originalTokens, optimizedTokens, savedTokens } = computePromptSavings(
@@ -81,16 +91,30 @@ function updateSavings(currentSavings, stats) {
     stats.optimizedChars
   );
 
-  const compressionSaved = (stats.messagesCompressed || 0) * TOKENS_PER_COMPRESSED_MSG;
-  const cacheSaved = (stats.cacheHits || 0) * TOKENS_PER_CACHE_HIT;
-  const totalSaved = savedTokens + compressionSaved + cacheSaved;
+  const compressionSaved  = (stats.messagesCompressed || 0) * TOKENS_PER_COMPRESSED_MSG;
+  const cacheSaved        = (stats.cacheHits || 0) * TOKENS_PER_CACHE_HIT;
+  // Output-policy savings: non-default task types produce a structured output
+  // directive that prevents Claude from padding responses (~50 tokens saved).
+  const policyType        = stats.taskType || "default";
+  const policySaved       = policyType !== "default" ? 50 : 0;
+  // Lifecycle savings: idle gap rebuild or compact mode reduces context tokens
+  const lifecycleSaved    = stats.lifecycleTokensSaved || 0;
+  const totalSaved        = savedTokens + compressionSaved + cacheSaved + policySaved + lifecycleSaved;
 
   return {
-    prompts_processed: s.prompts_processed + 1,
+    prompts_processed:            s.prompts_processed + 1,
     total_estimated_saved_tokens: s.total_estimated_saved_tokens + totalSaved,
-    total_original_tokens: s.total_original_tokens + originalTokens,
-    total_optimized_tokens: s.total_optimized_tokens + optimizedTokens,
-    total_cache_hits: (s.total_cache_hits || 0) + (stats.cacheHits || 0),
+    total_original_tokens:        s.total_original_tokens + originalTokens,
+    total_optimized_tokens:       s.total_optimized_tokens + optimizedTokens,
+    total_cache_hits:             (s.total_cache_hits || 0) + (stats.cacheHits || 0),
+    // Breakdown totals (additive)
+    prompt_saved_tokens:          (s.prompt_saved_tokens        || 0) + savedTokens,
+    history_saved_tokens:         (s.history_saved_tokens       || 0) + compressionSaved,
+    read_cache_saved_tokens:      (s.read_cache_saved_tokens    || 0) + cacheSaved,
+    output_policy_saved_tokens:   (s.output_policy_saved_tokens || 0) + policySaved,
+    lifecycle_saved_tokens:       (s.lifecycle_saved_tokens     || 0) + lifecycleSaved,
+    // Last-turn mode (non-cumulative; useful for telemetry/debugging)
+    lifecycle_mode:               stats.lifecycleMode || "normal",
   };
 }
 

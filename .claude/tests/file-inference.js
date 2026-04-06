@@ -36,7 +36,7 @@ const ADAPT = path.resolve(__dirname, "../adapters");
 
 const { filterRelevantFiles }                           = require(path.join(UTILS, "fileFilter.js"));
 const { getFileStatus, registerFile,
-        getChangedSectionsSummary }                     = require(path.join(UTILS, "readRegistry.js"));
+        getChangedSectionsSummary, normalizePath }      = require(path.join(UTILS, "readRegistry.js"));
 const { applyReadPolicy }                               = require(path.join(UTILS, "diffPolicy.js"));
 const { runPipeline }                                   = require(path.join(CORE,  "pipeline.js"));
 const { formatClaudeContext }                           = require(path.join(ADAPT, "claude.js"));
@@ -137,7 +137,7 @@ const TESTS = [
       // Register it
       const entry = registerFile(KNOWN_FILE, content, hash, registry, 1, sizeBytes);
       assertTrue("entry.hash matches", entry.hash === hash);
-      assertTrue("entry is in registry", !!registry[path.resolve(KNOWN_FILE)]);
+      assertTrue("entry is in registry", !!registry[normalizePath(KNOWN_FILE)]);
     },
   },
 
@@ -162,7 +162,7 @@ const TESTS = [
       registerFile(KNOWN_FILE, content, hash, registry, 1, sizeBytes);
 
       // Simulate a hash mismatch (file was modified externally)
-      registry[path.resolve(KNOWN_FILE)].hash = "000000000000";
+      registry[normalizePath(KNOWN_FILE)].hash = "000000000000";
 
       const { status: s3 } = getFileStatus(KNOWN_FILE, registry);
       assertEq("status is changed", s3, "changed");

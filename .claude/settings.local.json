@@ -11,7 +11,10 @@
       "Bash(node .claude/tests/adapter-parity.js)",
       "Bash(node .claude/tests/compression-safety.js)",
       "Bash(node .claude/tests/file-inference.js)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(node .claude/tests/cache-hit.js)",
+      "Bash(node .claude/tests/lifecycle.js)"
     ]
   }
 }

@@ -71,13 +71,23 @@ function loadState() {
     }
   } catch {}
   return {
-    prompts_processed: 0,
-    cache_hits:        0,
-    cache_misses:      0,
+    prompts_processed:            0,
+    cache_hits:                   0,
+    cache_misses:                 0,
     total_estimated_saved_tokens: 0,
-    savings_pct_sum:   0,
-    session_started:   new Date().toISOString(),
-    last_updated:      new Date().toISOString(),
+    savings_pct_sum:              0,
+    // Breakdown totals
+    prompt_saved_tokens:          0,
+    history_saved_tokens:         0,
+    read_cache_saved_tokens:      0,
+    output_policy_saved_tokens:   0,
+    lifecycle_saved_tokens:       0,
+    // Lifecycle mode counters
+    lifecycle_normal_turns:       0,
+    lifecycle_compact_turns:      0,
+    lifecycle_rebuild_turns:      0,
+    session_started:              new Date().toISOString(),
+    last_updated:                 new Date().toISOString(),
   };
 }
 
@@ -122,12 +132,13 @@ function appendLog(entry) {
  * Called by pipeline.js at the end of runPipeline().
  *
  * @param {{
- *   taskType:       string,   — classified task type (e.g. "code-fix")
- *   originalChars:  number,   — raw prompt character count
- *   optimizedChars: number,   — optimized prompt character count
- *   cacheHits:      number,   — files served from registry
- *   relevantFiles:  string[], — all files considered this turn
- *   updatedSavings: object,   — memory.savings after this turn
+ *   taskType:        string,   — classified task type (e.g. "code-fix")
+ *   originalChars:   number,   — raw prompt character count
+ *   optimizedChars:  number,   — optimized prompt character count
+ *   cacheHits:       number,   — files served from registry
+ *   relevantFiles:   string[], — all files considered this turn
+ *   updatedSavings:  object,   — memory.savings after this turn
+ *   lifecycleMode?:  string,   — "normal"|"compact"|"rebuild"
  * }} fields
  */
 function recordTurn(fields) {
@@ -138,6 +149,7 @@ function recordTurn(fields) {
       cacheHits     = 0,
       relevantFiles = [],
       updatedSavings,
+      lifecycleMode = "normal",
     } = fields;
 
     const state    = loadState();
@@ -155,14 +167,37 @@ function recordTurn(fields) {
       ? Math.round((turnSaved / wouldHaveSent) * 100)
       : 0;
 
+    // Per-turn breakdown from updatedSavings (diff from previous state)
+    const prevPromptSaved  = state.prompt_saved_tokens         || 0;
+    const prevHistSaved    = state.history_saved_tokens        || 0;
+    const prevCacheSaved   = state.read_cache_saved_tokens     || 0;
+    const prevPolicySaved  = state.output_policy_saved_tokens  || 0;
+
+    const turnPromptSaved  = Math.max(0, (updatedSavings?.prompt_saved_tokens         || 0) - prevPromptSaved);
+    const turnHistSaved    = Math.max(0, (updatedSavings?.history_saved_tokens        || 0) - prevHistSaved);
+    const turnCacheSaved   = Math.max(0, (updatedSavings?.read_cache_saved_tokens     || 0) - prevCacheSaved);
+    const turnPolicySaved  = Math.max(0, (updatedSavings?.output_policy_saved_tokens  || 0) - prevPolicySaved);
+
+    const turnLifecycleSaved = Math.max(
+      0,
+      (updatedSavings?.lifecycle_saved_tokens || 0) - (state.lifecycle_saved_tokens || 0)
+    );
+
     appendLog({
-      ts:     new Date().toISOString(),
-      turn:   state.prompts_processed + 1,
-      task:   taskType,
-      saved:  turnSaved,
-      hits:   cacheHits,
-      misses: cacheMisses,
-      pct:    turnPct,
+      ts:                    new Date().toISOString(),
+      turn:                  state.prompts_processed + 1,
+      task:                  taskType,
+      saved:                 turnSaved,
+      hits:                  cacheHits,
+      misses:                cacheMisses,
+      pct:                   turnPct,
+      lifecycle_mode:        lifecycleMode,
+      // Breakdown
+      prompt_saved:          turnPromptSaved,
+      history_saved:         turnHistSaved,
+      cache_saved:           turnCacheSaved,
+      policy_saved:          turnPolicySaved,
+      lifecycle_saved:       turnLifecycleSaved,
     });
 
     state.prompts_processed            += 1;
@@ -170,6 +205,16 @@ function recordTurn(fields) {
     state.cache_misses                 += cacheMisses;
     state.total_estimated_saved_tokens  = nowSaved;
     state.savings_pct_sum              += turnPct;
+    // Sync breakdown totals from updatedSavings
+    state.prompt_saved_tokens          = updatedSavings?.prompt_saved_tokens         || state.prompt_saved_tokens         || 0;
+    state.history_saved_tokens         = updatedSavings?.history_saved_tokens        || state.history_saved_tokens        || 0;
+    state.read_cache_saved_tokens      = updatedSavings?.read_cache_saved_tokens     || state.read_cache_saved_tokens     || 0;
+    state.output_policy_saved_tokens   = updatedSavings?.output_policy_saved_tokens  || state.output_policy_saved_tokens  || 0;
+    state.lifecycle_saved_tokens       = updatedSavings?.lifecycle_saved_tokens      || state.lifecycle_saved_tokens      || 0;
+    // Increment lifecycle mode counter for this turn
+    if (lifecycleMode === "rebuild")      state.lifecycle_rebuild_turns = (state.lifecycle_rebuild_turns || 0) + 1;
+    else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns || 0) + 1;
+    else                                  state.lifecycle_normal_turns  = (state.lifecycle_normal_turns  || 0) + 1;
     state.last_updated                  = new Date().toISOString();
     saveState(state);
 
@@ -194,6 +239,16 @@ function getMetrics() {
       average_estimated_savings_percent:  n > 0
         ? Math.round(s.savings_pct_sum / n)
         : 0,
+      // Breakdown
+      prompt_saved_tokens:                s.prompt_saved_tokens         || 0,
+      history_saved_tokens:               s.history_saved_tokens        || 0,
+      read_cache_saved_tokens:            s.read_cache_saved_tokens     || 0,
+      output_policy_saved_tokens:         s.output_policy_saved_tokens  || 0,
+      lifecycle_saved_tokens:             s.lifecycle_saved_tokens      || 0,
+      // Lifecycle mode distribution
+      lifecycle_normal_turns:             s.lifecycle_normal_turns      || 0,
+      lifecycle_compact_turns:            s.lifecycle_compact_turns     || 0,
+      lifecycle_rebuild_turns:            s.lifecycle_rebuild_turns     || 0,
       session_started:                    s.session_started,
       last_updated:                       s.last_updated,
     };

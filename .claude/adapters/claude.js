@@ -49,6 +49,11 @@ function formatClaudeContext(result) {
   // Output policy — always present (falls back to "efficient mode" default)
   sections.push(`[OUTPUT POLICY]\n${result.outputPolicyBlock}`);
 
+  // Tool usage policy — only for lightweight tasks where tool calls waste tokens
+  if (result.toolPolicyBlock) {
+    sections.push(result.toolPolicyBlock);
+  }
+
   // Retry context — only when prior failures exist in memory
   if (result.retryBlock) {
     sections.push(`[RETRY CONTEXT]\n${result.retryBlock}`);

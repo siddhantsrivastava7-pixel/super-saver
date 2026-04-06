@@ -31,12 +31,16 @@
  *   "last_verification_result": "",  // "success" | "failure" | ""
  *   "last_successful_pattern": "",
  *   "read_registry": {},    // { absPath: { hash, summary, symbols, lastUsedTurn, ... } }
+ *   "last_turn_timestamp": 0,      // ms epoch of last hook run (idle gap detection)
+ *   "idle_gap_ms": 0,              // ms elapsed since last turn (set each run)
+ *   "session_mode": "normal",      // "normal" | "compact" | "rebuild"
  *   "savings": {
  *     "prompts_processed": 0,
  *     "total_estimated_saved_tokens": 0,
  *     "total_original_tokens": 0,
  *     "total_optimized_tokens": 0,
- *     "total_cache_hits": 0
+ *     "total_cache_hits": 0,
+ *     "lifecycle_saved_tokens": 0
  *   }
  * }
  */
@@ -68,12 +72,17 @@ function defaultMemory() {
     last_verification_result: "",
     last_successful_pattern: "",
     read_registry: {},
+    // Lifecycle fields (added in v3 extension, backward-compatible)
+    last_turn_timestamp: 0,
+    idle_gap_ms:         0,
+    session_mode:        "normal",
     savings: {
-      prompts_processed: 0,
+      prompts_processed:            0,
       total_estimated_saved_tokens: 0,
-      total_original_tokens: 0,
-      total_optimized_tokens: 0,
-      total_cache_hits: 0,
+      total_original_tokens:        0,
+      total_optimized_tokens:       0,
+      total_cache_hits:             0,
+      lifecycle_saved_tokens:       0,
     },
   };
 }
@@ -193,6 +202,14 @@ function applyUpdates(mem, updates) {
 
   if (updates.verificationResult !== undefined) {
     mem.last_verification_result = updates.verificationResult;
+  }
+
+  // Persist lifecycle state so idle gap can be computed on the next turn.
+  // last_turn_timestamp is always refreshed to now (the time of saving).
+  if (updates.lifecycleState !== undefined) {
+    mem.last_turn_timestamp = Date.now();
+    mem.idle_gap_ms         = updates.lifecycleState.idleGapMs  || 0;
+    mem.session_mode        = updates.lifecycleState.mode       || "normal";
   }
 
   return mem;

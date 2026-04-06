@@ -21,8 +21,13 @@ const path = require("path");
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-// Number of most-recent turns to keep verbatim
+// Default number of most-recent turns to keep verbatim.
+// Overridden per-call via compressHistory(path, prompt, { compressionLevel }).
 const RECENT_WINDOW = 4;
+
+// Maps named compression levels to RECENT_WINDOW values.
+// Controlled by lifecycle.js based on session state.
+const COMPRESSION_LEVEL_WINDOWS = { LOW: 6, MEDIUM: 4, HIGH: 2 };
 
 // Max characters per message in the recent window (prevents single huge message dominating)
 const MAX_MESSAGE_CHARS = 800;
@@ -224,13 +229,24 @@ function summarizeOlderMessages(messages) {
  *
  * @param {string} transcriptPath - Path to the JSONL transcript file
  * @param {string} currentPrompt  - The current user prompt (to avoid including it in context)
+ * @param {{ compressionLevel?: "LOW"|"MEDIUM"|"HIGH" }} [options]
+ *   compressionLevel controls how many recent turns are kept verbatim:
+ *     LOW    → 6 turns (new sessions, richer context)
+ *     MEDIUM → 4 turns (default)
+ *     HIGH   → 2 turns (idle gaps, long sessions)
  * @returns {{
- *   contextBlock: string,     // The formatted [CONTEXT SUMMARY] + [RECENT CONTEXT] block
- *   originalMessages: number, // Raw message count before compression
+ *   contextBlock: string,      // The formatted [CONTEXT SUMMARY] + [RECENT CONTEXT] block
+ *   originalMessages: number,  // Raw message count before compression
  *   compressedMessages: number // Effective "message equivalent" after compression
  * }}
  */
-function compressHistory(transcriptPath, currentPrompt) {
+function compressHistory(transcriptPath, currentPrompt, options = {}) {
+  // Resolve adaptive window from compression level (fallback to static default)
+  const level       = options.compressionLevel;
+  const recentWindow = (level && COMPRESSION_LEVEL_WINDOWS[level])
+    ? COMPRESSION_LEVEL_WINDOWS[level]
+    : RECENT_WINDOW;
+
   // Parse the full history
   let messages = parseTranscript(transcriptPath);
 
@@ -263,9 +279,9 @@ function compressHistory(transcriptPath, currentPrompt) {
     };
   }
 
-  // Split into "older" and "recent" windows
-  const recentMessages = messages.slice(-RECENT_WINDOW);
-  const olderMessages = messages.slice(0, -RECENT_WINDOW);
+  // Split into "older" and "recent" windows using the adaptive window size
+  const recentMessages = messages.slice(-recentWindow);
+  const olderMessages  = messages.slice(0, -recentWindow);
 
   const parts = [];
 

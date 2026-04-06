@@ -94,6 +94,7 @@ async function main() {
       files:           result.relevantFiles,
       updatedRegistry: result.updatedRegistry,
       updatedSavings:  result.updatedSavings,
+      lifecycleState:  result.lifecycleState,
     });
     saveMemory(memory);
   } catch {

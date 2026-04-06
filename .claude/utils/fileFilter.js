@@ -105,6 +105,82 @@ function extractMentionedFiles(prompt) {
   return result.slice(0, MAX_FILES);
 }
 
+/**
+ * Search the entire project tree for a file with an exact basename match.
+ * Used when an explicit mention like "pipeline.js" doesn't exist at the cwd root —
+ * the file could be in any subdirectory, including .claude/ or src/.
+ *
+ * Unlike walkDir (which skips .claude/, .git/ etc.), this search only skips
+ * directories that can never contain user code: node_modules, dist, .git.
+ *
+ * @param {string} rootDir  — project root to search from
+ * @param {string} target   — exact filename to find, e.g. "pipeline.js"
+ * @returns {string[]}      — relative paths (forward slashes), up to 3 matches
+ */
+function findFilesByExactName(rootDir, target) {
+  const results = [];
+  const targetLower = target.toLowerCase();
+
+  // Only skip directories that are truly irrelevant — NOT .claude, src, lib, etc.
+  const HARD_SKIP = new Set([
+    "node_modules", ".git", "dist", "build", ".next", ".nuxt",
+    "coverage", "__pycache__", ".venv", "vendor", "target",
+  ]);
+
+  function walk(dir, depth) {
+    if (depth > 5 || results.length >= 3) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
+
+    for (const entry of entries) {
+      if (results.length >= 3) break;
+      if (entry.isDirectory()) {
+        if (!HARD_SKIP.has(entry.name)) {
+          walk(path.join(dir, entry.name), depth + 1);
+        }
+      } else if (entry.isFile() && entry.name.toLowerCase() === targetLower) {
+        const rel = path.relative(rootDir, path.join(dir, entry.name)).replace(/\\/g, "/");
+        results.push(rel);
+      }
+    }
+  }
+
+  try { walk(rootDir, 0); } catch {}
+  return results;
+}
+
+/**
+ * Resolve an explicit file mention to an actual relative path in the project.
+ *
+ * Strategy:
+ *   1. If the mention looks like a path (contains /), try path.resolve(cwd, mention).
+ *   2. Try path.resolve(cwd, basename) directly (file at project root).
+ *   3. Search the whole tree for an exact basename match.
+ *   4. If still not found, return the original mention (caller shows "not found").
+ *
+ * @param {string} mention — e.g. "pipeline.js" or "src/auth/login.ts"
+ * @param {string} cwd     — project root
+ * @returns {string}       — resolved relative path (forward slashes) or original mention
+ */
+function resolveExplicitFile(mention, cwd) {
+  const normalized = mention.replace(/\\/g, "/");
+
+  // 1. Try direct resolution (works for "src/auth.ts", ".claude/core/pipeline.js")
+  const direct = path.resolve(cwd, normalized);
+  if (fs.existsSync(direct)) {
+    return path.relative(cwd, direct).replace(/\\/g, "/");
+  }
+
+  // 2. Search tree by exact basename (works for bare "pipeline.js", "auth.ts")
+  const basename = path.basename(normalized);
+  const found = findFilesByExactName(cwd, basename);
+  if (found.length > 0) return found[0];
+
+  // 3. Fallback: return as-is; diffPolicy will show "not found"
+  return normalized;
+}
+
 // ─── Keyword-Based Inference ──────────────────────────────────────────────────
 
 /**
@@ -212,8 +288,9 @@ function filterRelevantFiles(prompt, cwd) {
   // Step 1: Check for explicitly mentioned files
   const explicit = extractMentionedFiles(prompt);
   if (explicit.length > 0) {
+    const resolved = explicit.map((f) => resolveExplicitFile(f, cwd)).slice(0, MAX_FILES);
     return {
-      files: explicit,
+      files: resolved,
       source: "explicit",
       patterns: [],
     };

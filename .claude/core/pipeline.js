@@ -50,21 +50,57 @@ const {
 }                                              = require(path.join(UTILS, "verifier.js"));
 const { updateSavings, formatSavingsBlock }    = require(path.join(UTILS, "savings.js"));
 const { recordTurn }                           = require(path.join(UTILS, "telemetry.js"));
+const {
+  detectLifecycleState,
+  buildRebuildContext,
+  buildCompactHeader,
+  getToolUsagePolicy,
+}                                              = require(path.join(UTILS, "lifecycle.js"));
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
 async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn }) {
 
+  // ── Step 2b: Lifecycle state detection ───────────────────────────────────
+  // Must run BEFORE compression so compression level and context mode are known.
+  let lifecycle = {
+    mode: "normal", compressionLevel: "MEDIUM",
+    idleGapMs: 0, idleGapMin: "0.0",
+    isIdleGap: false, isLongSession: false, estimatedSavedTokens: 0,
+  };
+  try {
+    lifecycle = detectLifecycleState(memory, currentTurn);
+  } catch {
+    // Non-fatal — proceed with defaults
+  }
+
   // ── Step 3: Compress history ─────────────────────────────────────────────
+  // Mode-aware:
+  //   rebuild → skip history entirely, build minimal context from memory
+  //   compact → use HIGH compression + prepend compact header
+  //   normal  → standard adaptive compression
   let contextBlock = "";
   let messagesCompressed = 0;
   try {
-    const compression = compressHistory(transcriptPath, prompt);
-    contextBlock       = compression.contextBlock;
-    messagesCompressed = Math.max(
-      0,
-      compression.originalMessages - compression.compressedMessages
-    );
+    if (lifecycle.mode === "rebuild") {
+      // Replace full history with a minimal, memory-derived context block.
+      // This is the core token-saving mechanism for idle gap turns.
+      contextBlock = buildRebuildContext(memory);
+      // messagesCompressed = 0 (no transcript read — savings tracked via lifecycle)
+    } else {
+      const compression = compressHistory(transcriptPath, prompt, {
+        compressionLevel: lifecycle.compressionLevel,
+      });
+      contextBlock       = compression.contextBlock;
+      messagesCompressed = Math.max(
+        0,
+        compression.originalMessages - compression.compressedMessages
+      );
+      // For compact mode, prepend the compact mode header to signal Claude
+      if (lifecycle.mode === "compact" && contextBlock) {
+        contextBlock = `${buildCompactHeader()}\n\n${contextBlock}`;
+      }
+    }
   } catch {
     // Non-fatal — proceed without history context
   }
@@ -119,10 +155,13 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
   // ── Step 7: Task-aware output policy ─────────────────────────────────────
   let outputPolicyBlock = "";
   let taskType          = "default";
+  let toolPolicyBlock   = "";
   try {
     const policy   = getOutputPolicy(optimizedTask, isMultiStep);
     outputPolicyBlock = policy.block;
     taskType          = policy.taskType;
+    // Tool usage policy — only for lightweight tasks where tool calls waste tokens
+    toolPolicyBlock = getToolUsagePolicy(taskType);
   } catch {
     outputPolicyBlock = "Keep answer concise. Do not repeat context.";
   }
@@ -151,6 +190,9 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       optimizedChars,
       messagesCompressed,
       cacheHits,
+      taskType,
+      lifecycleMode:        lifecycle.mode,
+      lifecycleTokensSaved: lifecycle.estimatedSavedTokens,
     });
     savingsLine = formatSavingsBlock(updatedSavings);
   } catch {
@@ -161,7 +203,11 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
   // Telemetry is the one deliberate side effect inside runPipeline.
   // It writes to .claude/logs/ so observability survives process restarts.
   try {
-    recordTurn({ taskType, originalChars, optimizedChars, cacheHits, relevantFiles, updatedSavings });
+    recordTurn({
+      taskType, originalChars, optimizedChars, cacheHits,
+      relevantFiles, updatedSavings,
+      lifecycleMode: lifecycle.mode,
+    });
   } catch {}
 
   return {
@@ -189,6 +235,12 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // Retry / verification
     retryBlock,
     verificationSuggestion,
+
+    // Tool policy (for adapter rendering)
+    toolPolicyBlock,
+
+    // Lifecycle state (for memory persistence + adapter rendering)
+    lifecycleState: lifecycle,
 
     // Registry + savings (for memory persistence by the adapter)
     updatedRegistry,
