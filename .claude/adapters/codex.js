@@ -85,6 +85,13 @@ function formatCodexContext(result) {
   const instruction = CODEX_INSTRUCTIONS[result.taskType] ?? DEFAULT_INSTRUCTION;
   parts.push(instruction);
 
+  // ── Tool usage constraint (lightweight tasks only) ────────────────────────
+  // toolPolicyBlock is set by lifecycle.js for explanation/formatting/small-edit
+  // tasks. Codex idiom: inline note rather than a bracketed section tag.
+  if (result.toolPolicyBlock) {
+    parts.push("Avoid external tool calls unless strictly required. Reason from context.");
+  }
+
   // ── Failure awareness (if prior attempts failed) ──────────────────────────
   if (result.retryBlock) {
     parts.push(result.retryBlock);
@@ -92,15 +99,21 @@ function formatCodexContext(result) {
 
   const systemPrompt = parts.join("\n\n");
 
+  const lc = result.lifecycleState;
+
   return {
     systemPrompt,
     optimizedPrompt: result.optimizedTask,
     metadata: {
-      taskType:        result.taskType,
-      originalTokens:  Math.ceil(result.originalChars  / 4),
-      optimizedTokens: Math.ceil(result.optimizedChars / 4),
-      cacheHits:       result.cacheHits,
-      savingsLine:     result.savingsLine,
+      taskType:              result.taskType,
+      originalTokens:        Math.ceil(result.originalChars  / 4),
+      optimizedTokens:       Math.ceil(result.optimizedChars / 4),
+      cacheHits:             result.cacheHits,
+      savingsLine:           result.savingsLine,
+      // Lifecycle fields — lets Codex callers observe session state
+      lifecycleMode:         lc?.mode              ?? "normal",
+      lifecycleIdleGapMin:   lc?.idleGapMin        ?? "0.0",
+      lifecycleSavedTokens:  lc?.estimatedSavedTokens ?? 0,
     },
   };
 }
