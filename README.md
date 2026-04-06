@@ -22,76 +22,43 @@ A token optimization hook for Claude Code and Codex CLI. Intercepts every prompt
 
 ---
 
-## Install — Claude Code
+## Install
 
-### 1. Copy `.claude/` into your project
+### Claude Code — one command
 
 ```bash
-git clone https://github.com/siddhantsrivastava7-pixel/super-saver.git
-cp -r super-saver/.claude ./your-project/.claude
 cd your-project
+npx github:siddhantsrivastava7-pixel/super-saver
 ```
 
-### 2. Register the hook
+Then open Claude Code from your project folder. The hook is live.
 
-The hook is already registered in `.claude/settings.json` (copied in step 1). Verify it contains:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/beforePrompt.js",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-If you already have a `.claude/settings.json`, merge the `UserPromptSubmit` block into it.
-
-### 3. Open Claude Code from your project folder
+### Codex CLI — one command
 
 ```bash
-claude
+cd your-project
+npx github:siddhantsrivastava7-pixel/super-saver --codex
 ```
 
-That's it. The hook activates on every prompt automatically.
+Then wire `.codex/config.toml` hooks into your Codex CLI config (see [Codex details](#codex-details) below).
 
-> **Note:** Claude Code must be opened from the folder containing `.claude/`. The hook is project-scoped.
+### Both at once
+
+```bash
+npx github:siddhantsrivastava7-pixel/super-saver --codex
+```
+
+The installer:
+- Copies `.claude/` (and `.codex/` if `--codex`) into the current directory
+- Safely merges the `UserPromptSubmit` hook into any existing `.claude/settings.json` without touching your other settings
+- Runs a smoke test to confirm the hook produces valid output
+- Prints next steps
+
+> **Re-running is safe** — existing files are updated, hook entries are never duplicated.
 
 ---
 
-## Install — Codex CLI
-
-### 1. Copy both `.claude/` and `.codex/` into your project
-
-```bash
-git clone https://github.com/siddhantsrivastava7-pixel/super-saver.git
-cp -r super-saver/.claude ./your-project/.claude
-cp -r super-saver/.codex  ./your-project/.codex
-cd your-project
-```
-
-### 2. Register the hooks in your Codex config
-
-Edit `.codex/config.toml` (already present) and verify the hooks block:
-
-```toml
-[hooks]
-pre_prompt = "node .codex/hooks/pre_prompt.js"
-post_turn  = "node .codex/hooks/post_turn.js"
-```
-
-Wire these into your Codex CLI's hook system. The exact config key depends on your CLI version — check its docs for `pre_prompt` or `beforeTurn` equivalents.
-
-### 3. What the Codex hook produces
+## Codex details
 
 Each turn `pre_prompt.js` calls the shared pipeline and writes to stdout:
 
@@ -109,7 +76,7 @@ Each turn `pre_prompt.js` calls the shared pipeline and writes to stdout:
 }
 ```
 
-Use `system_prompt` as the `system` role message and `user_prompt` as the `user` role message when calling the API:
+Use `system_prompt` as the `system` role and `user_prompt` as the `user` role:
 
 ```js
 const { system_prompt, user_prompt } = JSON.parse(hookOutput);
@@ -122,6 +89,16 @@ await openai.chat.completions.create({
   ],
 });
 ```
+
+Wire the hooks in `.codex/config.toml`:
+
+```toml
+[hooks]
+pre_prompt = "node .codex/hooks/pre_prompt.js"
+post_turn  = "node .codex/hooks/post_turn.js"
+```
+
+The exact config key depends on your Codex CLI version — check its docs for `pre_prompt` or `beforeTurn` equivalents.
 
 ---
 

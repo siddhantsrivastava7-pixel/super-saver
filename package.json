@@ -1,0 +1,17 @@
+{
+  "name": "super-saver",
+  "version": "1.2.0",
+  "description": "Token optimization hook for Claude Code and Codex CLI",
+  "bin": {
+    "super-saver": "./setup.js"
+  },
+  "scripts": {
+    "setup": "node setup.js",
+    "test": "node .claude/tests/compression-safety.js && node .claude/tests/file-inference.js && node .claude/tests/adapter-parity.js && node .claude/tests/cache-hit.js && node .claude/tests/lifecycle.js"
+  },
+  "keywords": ["claude", "codex", "token", "optimization", "hook", "llm"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
