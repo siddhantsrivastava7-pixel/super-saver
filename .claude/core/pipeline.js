@@ -61,6 +61,7 @@ const {
   getCompressionWindow,
 }                                              = require(path.join(UTILS, "lifecycle.js"));
 const { extractSmartMemory }                   = require(path.join(UTILS, "smartMemory.js"));
+const { detectTaskShift }                      = require(path.join(UTILS, "memoryDecay.js"));
 const { computeSessionProof, formatProofLine } = require(path.join(UTILS, "proofEngine.js"));
 const { analyzeToolBehavior }                  = require(path.join(UTILS, "toolTracker.js"));
 
@@ -81,13 +82,21 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // Non-fatal — proceed with defaults
   }
 
-  // ── Step 2c: Smart memory extraction ─────────────────────────────────────
+  // ── Step 2c: Smart memory extraction + task shift detection ─────────────
   // Extract structured facts from the current prompt for memory persistence.
+  // Also detect if the prompt represents a significant topic shift vs. the
+  // established session goal — sets taskShifted=true so applyUpdates() can
+  // clear stale task-specific context before merging the new items.
   // These are returned as smartMemoryUpdate and persisted by the hook via
   // applyUpdates() — pipeline.js itself does not mutate memory.
-  let smartMemoryUpdate = { decisions: [], constraints: [], known_issues: [], important_files: [] };
+  let smartMemoryUpdate = {
+    decisions: [], constraints: [], known_issues: [], important_files: [],
+    taskShifted: false,
+  };
   try {
-    smartMemoryUpdate = extractSmartMemory(prompt);
+    const extracted   = extractSmartMemory(prompt, currentTurn);
+    const taskShifted = detectTaskShift(memory, prompt, currentTurn);
+    smartMemoryUpdate = { ...extracted, taskShifted };
   } catch {
     // Non-fatal — proceed without smart memory this turn
   }
@@ -103,7 +112,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     if (lifecycle.mode === "rebuild") {
       // Replace full history with a minimal, memory-derived context block.
       // This is the core token-saving mechanism for idle gap turns.
-      contextBlock = buildRebuildContext(memory);
+      contextBlock = buildRebuildContext(memory, currentTurn);
       // messagesCompressed = 0 (no transcript read — savings tracked via lifecycle)
     } else {
       const compression = compressHistory(transcriptPath, prompt, {

@@ -96,6 +96,7 @@ async function main() {
       updatedSavings:    result.updatedSavings,
       lifecycleState:    result.lifecycleState,
       smartMemoryUpdate: result.smartMemoryUpdate,
+      currentTurn,
     });
     saveMemory(memory);
   } catch {

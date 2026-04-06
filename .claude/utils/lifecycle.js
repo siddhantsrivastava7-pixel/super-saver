@@ -167,9 +167,9 @@ function detectLifecycleState(memory, currentTurn) {
  * @param {object} memory - loaded session memory (v2 schema with v3 fields)
  * @returns {string}
  */
-function buildRebuildContext(memory) {
+function buildRebuildContext(memory, currentTurn = 0) {
   try {
-    return buildStructuredRebuildContext(memory);
+    return buildStructuredRebuildContext(memory, currentTurn);
   } catch {
     // Graceful fallback — basic block using only v1 fields
     const lines = ["[SESSION REBUILD]"];

@@ -53,6 +53,13 @@
 const fs = require("fs");
 const path = require("path");
 
+const {
+  normalizeToItems,
+  mergeAndPruneItems,
+  detectTaskShift,
+  applyTaskShiftReset,
+} = require(path.join(__dirname, "memoryDecay.js"));
+
 // ─── Path ─────────────────────────────────────────────────────────────────────
 
 const MEMORY_FILE = path.resolve(__dirname, "../hooks/.session-memory.json");
@@ -219,30 +226,38 @@ function applyUpdates(mem, updates) {
     mem.session_mode        = updates.lifecycleState.mode       || "normal";
   }
 
-  // V2: Smart memory — merge extracted facts into bounded arrays.
-  // Each category is deduplicated and capped; new entries are appended
-  // (most-recent-wins ordering) by cappedPush.
+  // V3: Smart memory — merge extracted MemoryItem[] into existing items with
+  // confidence decay, superseded detection, and prune. Handles legacy string[]
+  // in existing memory transparently via normalizeToItems().
   if (updates.smartMemoryUpdate) {
-    const sm = updates.smartMemoryUpdate;
+    const sm   = updates.smartMemoryUpdate;
+    const turn = updates.currentTurn ?? 0;
+
+    // Task shift: reset task-specific memory BEFORE merging new items.
+    // applyTaskShiftReset clears known_issues and decays decisions × 0.4.
+    if (sm.taskShifted) {
+      applyTaskShiftReset(mem, updates.prompt || "", turn);
+    }
+
     if (Array.isArray(sm.decisions)) {
-      for (const d of sm.decisions) {
-        mem.decisions = cappedPush(mem.decisions ?? [], d, 8);
-      }
+      const existing = normalizeToItems(mem.decisions   ?? [], "decision",       turn);
+      const fresh    = normalizeToItems(sm.decisions,          "decision",       turn);
+      mem.decisions  = mergeAndPruneItems(existing, fresh, turn, 8);
     }
     if (Array.isArray(sm.constraints)) {
-      for (const c of sm.constraints) {
-        mem.constraints = cappedPush(mem.constraints ?? [], c, 6);
-      }
+      const existing   = normalizeToItems(mem.constraints ?? [], "constraint",   turn);
+      const fresh      = normalizeToItems(sm.constraints,        "constraint",   turn);
+      mem.constraints  = mergeAndPruneItems(existing, fresh, turn, 6);
     }
     if (Array.isArray(sm.known_issues)) {
-      for (const i of sm.known_issues) {
-        mem.known_issues = cappedPush(mem.known_issues ?? [], i, 5);
-      }
+      const existing    = normalizeToItems(mem.known_issues ?? [], "known_issue", turn);
+      const fresh       = normalizeToItems(sm.known_issues,        "known_issue", turn);
+      mem.known_issues  = mergeAndPruneItems(existing, fresh, turn, 5);
     }
     if (Array.isArray(sm.important_files)) {
-      for (const f of sm.important_files) {
-        mem.important_files = cappedPush(mem.important_files ?? [], f, 10);
-      }
+      const existing       = normalizeToItems(mem.important_files ?? [], "important_file", turn);
+      const fresh          = normalizeToItems(sm.important_files,        "important_file", turn);
+      mem.important_files  = mergeAndPruneItems(existing, fresh, turn, 10);
     }
   }
 

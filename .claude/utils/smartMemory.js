@@ -1,11 +1,17 @@
 /**
  * .claude/utils/smartMemory.js
  *
- * Smart Memory Extraction Engine
+ * Smart Memory Extraction Engine (V3 — MemoryItem output)
  *
  * Extracts structured, high-signal facts from the current prompt into
  * persistent memory fields. Rebuild and compact modes use this structured
  * memory to reconstruct context without replaying raw conversation history.
+ *
+ * V3 change: extraction functions now return MemoryItem[] with confidence
+ * scores instead of plain string[]. buildStructuredRebuildContext accepts
+ * currentTurn and uses toActiveValues() to filter by effective confidence
+ * (decay + superseded checks). Legacy string[] in memory is handled
+ * transparently by toActiveValues.
  *
  * Extracted fields:
  *   decisions        — architectural or approach choices detected this turn
@@ -13,15 +19,28 @@
  *   known_issues     — errors, bugs, and failures mentioned
  *   important_files  — file paths explicitly referenced in the prompt
  *
+ * Confidence scoring:
+ *   decisions     — strong commitment verb → 0.9, neutral phrasing → 0.75
+ *   constraints   — hard trigger (must not/never/always) → 0.9, soft → 0.75
+ *   known_issues  — explicit (error:/exception:) → 0.8, implicit → 0.65
+ *   important_files → 0.8 (uniform — presence is clear signal)
+ *
  * Design rules:
  *   - Keyword heuristics only — no ML, no API calls
  *   - Short phrases only — not raw sentences
- *   - Deduped and capped — never unbounded growth
+ *   - Deduped and capped within extraction; cross-turn merge handled by mergeAndPruneItems
  *   - Non-fatal — extraction failure returns empty arrays
  *   - Pure function — no I/O
  */
 
 "use strict";
+
+const path = require("path");
+
+const {
+  createMemoryItem,
+  toActiveValues,
+} = require(path.join(__dirname, "memoryDecay.js"));
 
 // ─── Caps ────────────────────────────────────────────────────────────────────
 
@@ -97,12 +116,26 @@ function isConfidentDecision(phrase) {
 }
 
 /**
- * Extract decision phrases from a prompt.
+ * Compute confidence score for a decision phrase.
+ * Phrases anchored by a strong commitment verb get 0.9; neutral phrasing 0.75.
+ * Only called on phrases that already passed isConfidentDecision.
+ *
+ * @param {string} phrase
+ * @returns {number}
+ */
+function decisionConfidence(phrase) {
+  const lower = phrase.toLowerCase();
+  return STRONG_DECISION_VERBS.some((v) => lower.includes(v)) ? 0.9 : 0.75;
+}
+
+/**
+ * Extract decision phrases from a prompt as MemoryItem[].
  * Only stores phrases that contain strong commitment verbs (not hedges/speculation).
  * @param {string} prompt
- * @returns {string[]}
+ * @param {number} currentTurn
+ * @returns {MemoryItem[]}
  */
-function extractDecisions(prompt) {
+function extractDecisions(prompt, currentTurn = 0) {
   const lower = prompt.toLowerCase();
   const found = [];
 
@@ -118,10 +151,20 @@ function extractDecisions(prompt) {
     }
   }
 
-  return dedupCap(found, MAX_DECISIONS);
+  const deduped = dedupStrings(found, MAX_DECISIONS);
+  return deduped.map((v) =>
+    createMemoryItem(v, "decision", decisionConfidence(v), currentTurn)
+  );
 }
 
 // ─── Constraint Extraction ────────────────────────────────────────────────────
+
+// Hard constraint triggers → high confidence (0.9) — absolute rules
+const HARD_CONSTRAINT_TRIGGERS = [
+  "must not",
+  "never",
+  "always",
+];
 
 const CONSTRAINT_TRIGGERS = [
   "don't",
@@ -139,11 +182,23 @@ const CONSTRAINT_TRIGGERS = [
 ];
 
 /**
- * Extract constraint phrases from a prompt.
- * @param {string} prompt
- * @returns {string[]}
+ * Compute confidence for a constraint phrase.
+ * Hard constraints (must not/never/always) → 0.9; soft → 0.75.
+ * @param {string} phrase
+ * @returns {number}
  */
-function extractConstraints(prompt) {
+function constraintConfidence(phrase) {
+  const lower = phrase.toLowerCase();
+  return HARD_CONSTRAINT_TRIGGERS.some((t) => lower.includes(t)) ? 0.9 : 0.75;
+}
+
+/**
+ * Extract constraint phrases from a prompt as MemoryItem[].
+ * @param {string} prompt
+ * @param {number} currentTurn
+ * @returns {MemoryItem[]}
+ */
+function extractConstraints(prompt, currentTurn = 0) {
   const lower = prompt.toLowerCase();
   const found = [];
 
@@ -157,10 +212,19 @@ function extractConstraints(prompt) {
     }
   }
 
-  return dedupCap(found, MAX_CONSTRAINTS);
+  const deduped = dedupStrings(found, MAX_CONSTRAINTS);
+  return deduped.map((v) =>
+    createMemoryItem(v, "constraint", constraintConfidence(v), currentTurn)
+  );
 }
 
 // ─── Known Issues Extraction ─────────────────────────────────────────────────
+
+// Explicit issue triggers → higher confidence (0.8) — exact signal
+const EXPLICIT_ISSUE_TRIGGERS = [
+  "error:",
+  "exception:",
+];
 
 const ISSUE_TRIGGERS = [
   "error:",
@@ -177,11 +241,23 @@ const ISSUE_TRIGGERS = [
 ];
 
 /**
- * Extract known-issue phrases from a prompt.
- * @param {string} prompt
- * @returns {string[]}
+ * Compute confidence for a known-issue phrase.
+ * Explicit labels (error:/exception:) → 0.8; implicit → 0.65.
+ * @param {string} phrase
+ * @returns {number}
  */
-function extractKnownIssues(prompt) {
+function issueConfidence(phrase) {
+  const lower = phrase.toLowerCase();
+  return EXPLICIT_ISSUE_TRIGGERS.some((t) => lower.includes(t)) ? 0.8 : 0.65;
+}
+
+/**
+ * Extract known-issue phrases from a prompt as MemoryItem[].
+ * @param {string} prompt
+ * @param {number} currentTurn
+ * @returns {MemoryItem[]}
+ */
+function extractKnownIssues(prompt, currentTurn = 0) {
   const lower = prompt.toLowerCase();
   const found = [];
 
@@ -195,7 +271,10 @@ function extractKnownIssues(prompt) {
     }
   }
 
-  return dedupCap(found, MAX_KNOWN_ISSUES);
+  const deduped = dedupStrings(found, MAX_KNOWN_ISSUES);
+  return deduped.map((v) =>
+    createMemoryItem(v, "known_issue", issueConfidence(v), currentTurn)
+  );
 }
 
 // ─── Important Files Extraction ───────────────────────────────────────────────
@@ -206,26 +285,34 @@ const FILE_PATTERN = /\b[\w\-./@]+\.(js|ts|tsx|jsx|py|go|rs|java|cs|rb|php|json|
 // Noise patterns to exclude from file extraction
 const FILE_NOISE  = /^(e\.g|etc|i\.e|vs|eg)$/i;
 
+// Uniform confidence for file mentions — presence in prompt is clear signal
+const FILE_CONFIDENCE = 0.8;
+
 /**
- * Extract important file paths explicitly mentioned in the prompt.
+ * Extract important file paths explicitly mentioned in the prompt as MemoryItem[].
  * @param {string} prompt
- * @returns {string[]}
+ * @param {number} currentTurn
+ * @returns {MemoryItem[]}
  */
-function extractImportantFiles(prompt) {
+function extractImportantFiles(prompt, currentTurn = 0) {
   const matches = prompt.match(FILE_PATTERN) ?? [];
   const cleaned = matches
     .map((f) => f.toLowerCase())
     .filter((f) => f.length > 3 && !FILE_NOISE.test(f.replace(/\.\w+$/, "")));
-  return dedupCap(cleaned, MAX_IMPORTANT_FILES);
+  const deduped = dedupStrings(cleaned, MAX_IMPORTANT_FILES);
+  return deduped.map((v) =>
+    createMemoryItem(v, "important_file", FILE_CONFIDENCE, currentTurn)
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Deduplicate and cap an array at maxLen.
- * Uses case-insensitive dedup; keeps the most recently seen unique entries.
+ * Deduplicate and cap a string array at maxLen.
+ * Case-insensitive; keeps the last (most recent) maxLen unique entries.
+ * Used within a single extraction call to collapse duplicates before wrapping.
  */
-function dedupCap(arr, maxLen) {
+function dedupStrings(arr, maxLen) {
   const seen   = new Set();
   const result = [];
   for (const item of arr) {
@@ -235,40 +322,44 @@ function dedupCap(arr, maxLen) {
       result.push(item);
     }
   }
-  // Keep the last maxLen (most recent)
   return result.slice(-maxLen);
 }
 
 /**
- * Merge two arrays deduped and capped.
- * Used to merge existing memory arrays with freshly extracted items.
+ * Merge two string arrays deduped and capped.
+ * Used by buildStructuredRebuildContext to merge important_files + recent_files
+ * (both may be string[] for recent_files which is always strings).
  */
 function mergeArrays(existing, fresh, maxLen) {
-  return dedupCap([...(existing ?? []), ...(fresh ?? [])], maxLen);
+  return dedupStrings([...(existing ?? []), ...(fresh ?? [])], maxLen);
 }
 
 // ─── Main Extraction Function ─────────────────────────────────────────────────
 
 /**
  * Extract structured memory facts from the current prompt.
- * Returns only the delta for THIS TURN — the caller (memory.js) merges
- * these into the existing session memory with proper caps.
+ * Returns MemoryItem[] per category for THIS TURN — the caller (memory.js)
+ * merges these into the existing session memory via mergeAndPruneItems.
  *
- * @param {string} prompt   — current user prompt
+ * Backward compat: existing memory fields may still be string[] (legacy sessions).
+ * normalizeToItems() in memory.js handles the mixed-type merge transparently.
+ *
+ * @param {string} prompt       — current user prompt
+ * @param {number} currentTurn  — current session turn (0 if unknown)
  * @returns {{
- *   decisions:       string[],
- *   constraints:     string[],
- *   known_issues:    string[],
- *   important_files: string[],
+ *   decisions:       MemoryItem[],
+ *   constraints:     MemoryItem[],
+ *   known_issues:    MemoryItem[],
+ *   important_files: MemoryItem[],
  * }}
  */
-function extractSmartMemory(prompt) {
+function extractSmartMemory(prompt, currentTurn = 0) {
   try {
     return {
-      decisions:       extractDecisions(prompt),
-      constraints:     extractConstraints(prompt),
-      known_issues:    extractKnownIssues(prompt),
-      important_files: extractImportantFiles(prompt),
+      decisions:       extractDecisions(prompt, currentTurn),
+      constraints:     extractConstraints(prompt, currentTurn),
+      known_issues:    extractKnownIssues(prompt, currentTurn),
+      important_files: extractImportantFiles(prompt, currentTurn),
     };
   } catch {
     return { decisions: [], constraints: [], known_issues: [], important_files: [] };
@@ -280,14 +371,18 @@ function extractSmartMemory(prompt) {
 /**
  * Build a structured [SESSION REBUILD] context block from rich session memory.
  *
- * Replaces the shallow rebuild context from lifecycle.js with a fully
- * structured block that provides Goal → Decisions → Constraints → Issues → Files.
- * This is the primary output of the Smart Memory Engine.
+ * V3: uses toActiveValues(items, currentTurn) to filter by effective confidence
+ * before rendering. Items that have decayed, been superseded, or fall below
+ * PRUNE_THRESHOLD are silently excluded from the rebuild block.
  *
- * @param {object} memory - full session memory (schema v3 with v2 fields + v3 fields)
+ * Backward compat: string[] arrays (legacy sessions) pass through toActiveValues
+ * unchanged — they are always included (no decay metadata available).
+ *
+ * @param {object} memory       — full session memory (v2+/v3 schema)
+ * @param {number} currentTurn  — current turn for decay computation (default 0)
  * @returns {string}
  */
-function buildStructuredRebuildContext(memory) {
+function buildStructuredRebuildContext(memory, currentTurn = 0) {
   const lines = ["[SESSION REBUILD]"];
 
   // ── Core identity ─────────────────────────────────────────────────────────
@@ -298,33 +393,31 @@ function buildStructuredRebuildContext(memory) {
     lines.push(`Current Task: ${memory.current_task}`);
   }
 
-  // ── Key Decisions ─────────────────────────────────────────────────────────
-  const decisions = memory.decisions ?? [];
+  // ── Key Decisions — filtered by effective confidence ──────────────────────
+  const decisions = toActiveValues(memory.decisions ?? [], currentTurn);
   if (decisions.length > 0) {
     lines.push("\nKey Decisions:");
     decisions.slice(-5).forEach((d) => lines.push(`* ${d}`));
   }
 
-  // ── Constraints ───────────────────────────────────────────────────────────
-  const constraints = memory.constraints ?? [];
+  // ── Constraints — filtered (kept unless decayed or superseded) ─────────────
+  const constraints = toActiveValues(memory.constraints ?? [], currentTurn);
   if (constraints.length > 0) {
     lines.push("\nConstraints:");
     constraints.forEach((c) => lines.push(`* ${c}`));
   }
 
-  // ── Known Issues ─────────────────────────────────────────────────────────
-  const issues = memory.known_issues ?? [];
+  // ── Known Issues — filtered (cleared on task shift by applyTaskShiftReset) ─
+  const issues = toActiveValues(memory.known_issues ?? [], currentTurn);
   if (issues.length > 0) {
     lines.push("\nKnown Issues:");
     issues.forEach((i) => lines.push(`* ${i}`));
   }
 
-  // ── Important Files (merge smart + recent) ────────────────────────────────
-  const allFiles = mergeArrays(
-    memory.important_files ?? [],
-    memory.recent_files    ?? [],
-    6
-  );
+  // ── Important Files (merge smart + recent; recent_files is always string[]) ─
+  const smartFiles  = toActiveValues(memory.important_files ?? [], currentTurn);
+  const recentFiles = (memory.recent_files ?? []).filter((f) => typeof f === "string");
+  const allFiles    = mergeArrays(smartFiles, recentFiles, 6);
   if (allFiles.length > 0) {
     lines.push("\nImportant Files:");
     allFiles.forEach((f) => lines.push(`* ${f}`));
@@ -358,7 +451,10 @@ module.exports = {
   extractKnownIssues,
   extractImportantFiles,
   isConfidentDecision,
-  dedupCap,
+  decisionConfidence,
+  constraintConfidence,
+  issueConfidence,
+  dedupStrings,
   MAX_DECISIONS,
   MAX_CONSTRAINTS,
   MAX_KNOWN_ISSUES,
