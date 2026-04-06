@@ -45,6 +45,8 @@
 const fs   = require("fs");
 const path = require("path");
 
+const { computeTurnProof } = require(path.join(__dirname, "proofEngine.js"));
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const LOG_DIR    = path.resolve(__dirname, "../logs");
@@ -97,6 +99,8 @@ function loadState() {
     file_reads_estimate:              0,
     redundant_reads_estimate:         0,
     tool_suppressed_turns:            0,
+    estimated_tool_cost_tokens:       0,   // tokens tool calls would cost (cumulative)
+    estimated_suppression_saved:      0,   // tokens saved by suppression (cumulative)
     session_started:                  new Date().toISOString(),
     last_updated:                     new Date().toISOString(),
   };
@@ -155,14 +159,15 @@ function appendLog(entry) {
 function recordTurn(fields) {
   try {
     const {
-      taskType      = "unknown",
-      originalChars = 0,
-      cacheHits     = 0,
-      relevantFiles = [],
-      lifecycleMode = "normal",
+      taskType       = "unknown",
+      originalChars  = 0,
+      optimizedChars = 0,
+      cacheHits      = 0,
+      relevantFiles  = [],
+      lifecycleMode  = "normal",
       turnStats,
-      proofStats  = {},
-      toolStats   = {},
+      proofStats     = {},
+      toolStats      = {},
     } = fields;
 
     // turnStats contains the per-turn deltas from savings.js.
@@ -170,7 +175,7 @@ function recordTurn(fields) {
     // across multiple Claude Code sessions — even when memory.savings resets.
     const ts = turnStats ?? {};
     const turnSaved    = ts.total_saved    ?? 0;
-    const optimTokens  = ts.optimized_tokens ?? Math.ceil(originalChars / 4);
+    const optimTokens  = ts.optimized_tokens ?? Math.ceil((optimizedChars || originalChars) / 4);
 
     const origTokens  = Math.ceil(originalChars / 4);
     const cacheTotal  = relevantFiles.length;
@@ -181,6 +186,9 @@ function recordTurn(fields) {
     const turnPct = wouldHaveSent > 0
       ? Math.round((turnSaved / wouldHaveSent) * 100)
       : 0;
+
+    // Per-turn proof: before vs after for THIS TURN (not cumulative session)
+    const turnProof = computeTurnProof({ optimizedChars: optimizedChars || originalChars, turnStats: ts });
 
     const state = loadState();
 
@@ -199,6 +207,10 @@ function recordTurn(fields) {
       cache_saved:     ts.cache_saved     ?? 0,
       policy_saved:    ts.policy_saved    ?? 0,
       lifecycle_saved: ts.lifecycle_saved ?? 0,
+      // Per-turn proof: "Turn N → saved X tokens (without: Y, with: Z)"
+      proof_without:   turnProof.without_tokens,
+      proof_with:      turnProof.with_tokens,
+      per_turn_saved_tokens: turnProof.saved_tokens,
     });
 
     // Additive accumulation — each field += this turn's contribution.
@@ -236,6 +248,8 @@ function recordTurn(fields) {
     if (toolStats.is_suppressed) {
       state.tool_suppressed_turns = (state.tool_suppressed_turns ?? 0) + 1;
     }
+    state.estimated_tool_cost_tokens  += toolStats.estimated_tool_cost_tokens  ?? 0;
+    state.estimated_suppression_saved += toolStats.estimated_suppression_saved ?? 0;
 
     state.last_updated = new Date().toISOString();
     saveState(state);
@@ -278,10 +292,12 @@ function getMetrics() {
       estimated_total_tokens_saved:             s.estimated_total_tokens_saved             ?? 0,
       estimated_efficiency_percent:             s.estimated_efficiency_percent             ?? 0,
       // V2: Tool tracker
-      tool_calls_estimate:                s.tool_calls_estimate     ?? 0,
-      file_reads_estimate:                s.file_reads_estimate     ?? 0,
-      redundant_reads_estimate:           s.redundant_reads_estimate ?? 0,
-      tool_suppressed_turns:              s.tool_suppressed_turns   ?? 0,
+      tool_calls_estimate:                s.tool_calls_estimate         ?? 0,
+      file_reads_estimate:                s.file_reads_estimate         ?? 0,
+      redundant_reads_estimate:           s.redundant_reads_estimate    ?? 0,
+      tool_suppressed_turns:              s.tool_suppressed_turns       ?? 0,
+      estimated_tool_cost_tokens:         s.estimated_tool_cost_tokens  ?? 0,
+      estimated_suppression_saved:        s.estimated_suppression_saved ?? 0,
       session_started:                    s.session_started,
       last_updated:                       s.last_updated,
     };

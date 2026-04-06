@@ -15,6 +15,7 @@ const {
   LIGHTWEIGHT_TASKS,
   COMPLEX_TASKS,
   REPEATED_READ_THRESHOLD,
+  TOKENS_PER_TOOL_CALL,
 } = require(path.resolve(__dirname, "../utils/toolTracker.js"));
 
 // ─── Harness ──────────────────────────────────────────────────────────────────
@@ -216,14 +217,79 @@ section("11. Both suppression and optimization hint can be active");
   assert(result.optimizationHint !== "", "optimization hint active for repeated reads");
 }
 
-// ─── 6. Non-fatal on bad input ────────────────────────────────────────────────
+// ─── 6. Token impact ─────────────────────────────────────────────────────────
 
-section("12. analyzeToolBehavior is non-fatal on invalid input");
+section("12. Token impact — estimated_tool_cost_tokens");
+{
+  // complex task: 3 misses + 1 bonus = 4 tool calls × 200 = 800
+  const result = analyzeToolBehavior({
+    taskType:      "code-fix",
+    readRegistry:  {},
+    relevantFiles: ["a.js", "b.js", "c.js"],
+    cacheHits:     0,
+    currentTurn:   4,
+  });
+  const expectedCalls = result.stats.tool_calls_estimate;
+  const expectedCost  = expectedCalls * TOKENS_PER_TOOL_CALL;
+  assert(result.stats.estimated_tool_cost_tokens === expectedCost,
+    `tool cost = ${expectedCost} (${expectedCalls} calls × ${TOKENS_PER_TOOL_CALL})`,
+    `got ${result.stats.estimated_tool_cost_tokens}`);
+}
+
+section("13. Token impact — estimated_suppression_saved for lightweight task");
+{
+  // Lightweight task with 2 files → 2 × TOKENS_PER_TOOL_CALL suppressed
+  const result = analyzeToolBehavior({
+    taskType:      "explanation",
+    readRegistry:  {},
+    relevantFiles: ["a.js", "b.js"],
+    cacheHits:     0,
+    currentTurn:   3,
+  });
+  const expectedSaved = 2 * TOKENS_PER_TOOL_CALL;
+  assert(result.stats.estimated_suppression_saved === expectedSaved,
+    `suppression saves ${expectedSaved} tokens on explanation with 2 files`,
+    `got ${result.stats.estimated_suppression_saved}`);
+}
+
+section("14. Token impact — no suppression savings on complex task");
+{
+  const result = analyzeToolBehavior({
+    taskType:      "implementation",
+    readRegistry:  {},
+    relevantFiles: ["a.js", "b.js"],
+    cacheHits:     0,
+    currentTurn:   4,
+  });
+  assert(result.stats.estimated_suppression_saved === 0,
+    "complex task: suppression savings = 0 (tools are expected and useful)",
+    `got ${result.stats.estimated_suppression_saved}`);
+}
+
+section("15. Token impact — suppression savings = 0 when no files");
+{
+  const result = analyzeToolBehavior({
+    taskType:      "explanation",
+    readRegistry:  {},
+    relevantFiles: [],
+    cacheHits:     0,
+    currentTurn:   3,
+  });
+  assert(result.stats.estimated_suppression_saved === 0,
+    "no files → suppression savings = 0",
+    `got ${result.stats.estimated_suppression_saved}`);
+}
+
+// ─── 7. Non-fatal on bad input ────────────────────────────────────────────────
+
+section("16. analyzeToolBehavior is non-fatal on invalid input");
 {
   const result = analyzeToolBehavior({});
   assert(result.suppressionBlock  === "", "empty suppression on empty input");
   assert(result.optimizationHint  === "", "empty hint on empty input");
   assert(typeof result.stats      === "object", "stats object returned");
+  assert(result.stats.estimated_tool_cost_tokens  === 0, "cost = 0 on bad input");
+  assert(result.stats.estimated_suppression_saved === 0, "saved = 0 on bad input");
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

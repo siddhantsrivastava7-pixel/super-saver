@@ -33,7 +33,38 @@ const MAX_PHRASE_CHARS    = 100;
 
 // ─── Decision Extraction ─────────────────────────────────────────────────────
 
-// Signals that the user (or an earlier turn) committed to an approach
+// Strong commitment verbs — phrase must contain one of these to be stored.
+// Prevents hedging/speculation ("maybe try X") from polluting decisions.
+const STRONG_DECISION_VERBS = [
+  "decided",
+  "going with",
+  "switched",
+  "chose",
+  "replacing",
+  "migrating",
+  "moving to",
+  "we'll use",
+  "will use",
+  "use instead",
+];
+
+// Weak hedging markers — if present WITHOUT a strong verb, phrase is discarded.
+// "maybe we should try JWT" contains "try" but no strong verb → rejected.
+const WEAK_MARKERS = [
+  "maybe",
+  "perhaps",
+  "possibly",
+  "might",
+  "could try",
+  "should try",
+  "thinking about",
+  "wondering",
+  "considering",
+  "what if",
+  "what about",
+];
+
+// Trigger patterns used for initial phrase extraction
 const DECISION_TRIGGERS = [
   "decided to",
   "going with",
@@ -49,7 +80,25 @@ const DECISION_TRIGGERS = [
 ];
 
 /**
+ * Returns true if the phrase is a confident decision, not speculation.
+ * A phrase is hedged if it contains a weak marker but no strong commitment verb.
+ *
+ * @param {string} phrase — lowercased extracted phrase
+ * @returns {boolean}
+ */
+function isConfidentDecision(phrase) {
+  const lower = phrase.toLowerCase();
+  const hasStrong = STRONG_DECISION_VERBS.some((v) => lower.includes(v));
+  const hasWeak   = WEAK_MARKERS.some((w) => lower.includes(w));
+  // Keep if strong verb is present, regardless of weak markers.
+  // Reject only if weak marker present AND no strong verb.
+  if (hasWeak && !hasStrong) return false;
+  return true;
+}
+
+/**
  * Extract decision phrases from a prompt.
+ * Only stores phrases that contain strong commitment verbs (not hedges/speculation).
  * @param {string} prompt
  * @returns {string[]}
  */
@@ -62,7 +111,9 @@ function extractDecisions(prompt) {
     while ((idx = lower.indexOf(trigger, idx)) !== -1) {
       const snippet = prompt.slice(idx, idx + trigger.length + 60).trim();
       const phrase  = snippet.split(/[.!?\n]/)[0].trim().slice(0, MAX_PHRASE_CHARS);
-      if (phrase.length > 8) found.push(phrase);
+      if (phrase.length > 8 && isConfidentDecision(phrase)) {
+        found.push(phrase);
+      }
       idx += trigger.length;
     }
   }
@@ -306,6 +357,7 @@ module.exports = {
   extractConstraints,
   extractKnownIssues,
   extractImportantFiles,
+  isConfidentDecision,
   dedupCap,
   MAX_DECISIONS,
   MAX_CONSTRAINTS,

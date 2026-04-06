@@ -15,6 +15,7 @@ const {
   extractConstraints,
   extractKnownIssues,
   extractImportantFiles,
+  isConfidentDecision,
   dedupCap,
   MAX_DECISIONS,
   MAX_CONSTRAINTS,
@@ -205,7 +206,52 @@ section("14. buildStructuredRebuildContext — handles empty memory gracefully")
   assert(ctx.length > 10,                  "non-empty output");
 }
 
-section("15. dedupCap helper");
+section("15. Confidence filter — hedged phrases rejected");
+{
+  // "maybe we should try JWT" should NOT be stored as a decision
+  const hedgedPrompts = [
+    "maybe we should try JWT",
+    "perhaps we could use Redis",
+    "I'm thinking about switching to postgres",
+    "what if we used TypeScript instead",
+    "we might try using GraphQL",
+  ];
+  for (const prompt of hedgedPrompts) {
+    const decisions = extractDecisions(prompt);
+    assert(decisions.length === 0,
+      `hedged phrase not stored: "${prompt.slice(0, 40)}"`,
+      `got: ${JSON.stringify(decisions)}`);
+  }
+}
+
+section("16. Confidence filter — strong decisions accepted");
+{
+  const strongPrompts = [
+    "We decided to use JWT for authentication",
+    "Going with PostgreSQL instead of SQLite",
+    "We'll use TypeScript for the whole project",
+    "Switched to Redis for the cache layer",
+  ];
+  for (const prompt of strongPrompts) {
+    const decisions = extractDecisions(prompt);
+    assert(decisions.length > 0,
+      `strong decision stored: "${prompt.slice(0, 40)}"`,
+      `got: ${JSON.stringify(decisions)}`);
+  }
+}
+
+section("17. isConfidentDecision — direct API");
+{
+  assert(isConfidentDecision("decided to use postgres") === true,  "'decided to' is confident");
+  assert(isConfidentDecision("going with TypeScript")   === true,  "'going with' is confident");
+  assert(isConfidentDecision("maybe try jwt")           === false, "'maybe try' is hedged");
+  assert(isConfidentDecision("perhaps we could use X")  === false, "'perhaps could' is hedged");
+  // Strong + weak together → strong wins
+  assert(isConfidentDecision("decided to maybe use postgres") === true,
+    "'decided to' overrides 'maybe'");
+}
+
+section("18. dedupCap helper");
 {
   const result = dedupCap(["a", "b", "A", "c", "b", "d"], 3);
   assert(result.length <= 3,                              "capped at 3");

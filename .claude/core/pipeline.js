@@ -260,8 +260,8 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     recordTurn({
       taskType, originalChars, optimizedChars, cacheHits,
       relevantFiles, updatedSavings,
-      lifecycleMode: lifecycle.mode,
-      turnStats:     updatedSavings?.turnStats,
+      lifecycleMode:  lifecycle.mode,
+      turnStats:      updatedSavings?.turnStats,
       proofStats,
       toolStats,
     });

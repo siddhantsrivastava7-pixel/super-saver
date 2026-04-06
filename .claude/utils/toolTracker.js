@@ -52,6 +52,11 @@ const COMPLEX_TASKS = new Set([
 // Number of registry entries with repeat access before injecting optimization hint
 const REPEATED_READ_THRESHOLD = 3;
 
+// Estimated tokens per unsuppressed tool call.
+// Covers: tool call overhead (~50 tokens) + small response (~150 tokens avg).
+// Conservative — does not include large file-read responses.
+const TOKENS_PER_TOOL_CALL = 200;
+
 // ─── Blocks ───────────────────────────────────────────────────────────────────
 
 const SUPPRESSION_BLOCK = [
@@ -117,22 +122,24 @@ function estimateToolCalls(taskType, fileMisses) {
  *   suppressionBlock:  string,   — [TOOL USAGE POLICY] or ""
  *   optimizationHint:  string,   — [TOOL OPTIMIZATION] or ""
  *   stats: {
- *     is_suppressed:          boolean,
- *     has_repeated_reads:     boolean,
- *     repeated_read_count:    number,
- *     file_reads_this_turn:   number,
- *     redundant_reads:        number,
- *     tool_calls_estimate:    number,
+ *     is_suppressed:                  boolean,
+ *     has_repeated_reads:             boolean,
+ *     repeated_read_count:            number,
+ *     file_reads_this_turn:           number,
+ *     redundant_reads:                number,
+ *     tool_calls_estimate:            number,
+ *     estimated_tool_cost_tokens:     number,  — tokens these calls would cost
+ *     estimated_suppression_saved:    number,  — tokens saved by suppression
  *   },
  * }}
  */
 function analyzeToolBehavior({ taskType, readRegistry, relevantFiles, cacheHits, currentTurn }) {
   try {
-    const is_lightweight = LIGHTWEIGHT_TASKS.has(taskType);
+    const is_lightweight   = LIGHTWEIGHT_TASKS.has(taskType);
     const suppressionBlock = is_lightweight ? SUPPRESSION_BLOCK : "";
 
-    const repeatedCount  = countRepeatedReads(readRegistry, currentTurn);
-    const has_repeated   = repeatedCount >= REPEATED_READ_THRESHOLD;
+    const repeatedCount    = countRepeatedReads(readRegistry, currentTurn);
+    const has_repeated     = repeatedCount >= REPEATED_READ_THRESHOLD;
     const optimizationHint = has_repeated ? OPTIMIZATION_BLOCK : "";
 
     const file_reads_this_turn = relevantFiles?.length ?? 0;
@@ -140,16 +147,27 @@ function analyzeToolBehavior({ taskType, readRegistry, relevantFiles, cacheHits,
     const fileMisses           = Math.max(0, file_reads_this_turn - redundant_reads);
     const tool_calls_estimate  = estimateToolCalls(taskType, fileMisses);
 
+    // Token impact:
+    //   cost    = what tool calls would spend if unsuppressed
+    //   saved   = what suppression prevents on lightweight turns
+    //   On complex turns: tool calls are expected and useful — not "wasted"
+    const estimated_tool_cost_tokens  = tool_calls_estimate * TOKENS_PER_TOOL_CALL;
+    const estimated_suppression_saved = is_lightweight
+      ? file_reads_this_turn * TOKENS_PER_TOOL_CALL
+      : 0;
+
     return {
       suppressionBlock,
       optimizationHint,
       stats: {
-        is_suppressed:       is_lightweight,
-        has_repeated_reads:  has_repeated,
-        repeated_read_count: repeatedCount,
+        is_suppressed:              is_lightweight,
+        has_repeated_reads:         has_repeated,
+        repeated_read_count:        repeatedCount,
         file_reads_this_turn,
         redundant_reads,
         tool_calls_estimate,
+        estimated_tool_cost_tokens,
+        estimated_suppression_saved,
       },
     };
   } catch {
@@ -157,12 +175,14 @@ function analyzeToolBehavior({ taskType, readRegistry, relevantFiles, cacheHits,
       suppressionBlock: "",
       optimizationHint: "",
       stats: {
-        is_suppressed:       false,
-        has_repeated_reads:  false,
-        repeated_read_count: 0,
-        file_reads_this_turn: 0,
-        redundant_reads:     0,
-        tool_calls_estimate: 0,
+        is_suppressed:              false,
+        has_repeated_reads:         false,
+        repeated_read_count:        0,
+        file_reads_this_turn:       0,
+        redundant_reads:            0,
+        tool_calls_estimate:        0,
+        estimated_tool_cost_tokens: 0,
+        estimated_suppression_saved: 0,
       },
     };
   }
@@ -177,4 +197,5 @@ module.exports = {
   LIGHTWEIGHT_TASKS,
   COMPLEX_TASKS,
   REPEATED_READ_THRESHOLD,
+  TOKENS_PER_TOOL_CALL,
 };
