@@ -156,6 +156,47 @@ async function runTests() {
         );
       }
 
+      // V2 parity checks
+
+      // 9. toolOptimizationHint: if present in result, codex system prompt must reflect it
+      if (result.toolOptimizationHint) {
+        assertTrue(
+          "codex renders toolOptimizationHint when present",
+          codexOut.systemPrompt.includes("repeated file access")
+        );
+        assertTrue(
+          "claude renders toolOptimizationHint when present",
+          claudeOut.includes("[TOOL OPTIMIZATION]")
+        );
+      }
+
+      // 10. proofStats available in codex metadata
+      assertTrue(
+        "codex metadata has proofWithout (number)",
+        typeof codexOut.metadata.proofWithout === "number"
+      );
+      assertTrue(
+        "codex metadata has proofEfficiencyPct (number)",
+        typeof codexOut.metadata.proofEfficiencyPct === "number"
+      );
+
+      // 11. Proof invariant holds in codex metadata
+      assertTrue(
+        "codex proof: proofWithout = proofWith + proofSaved",
+        codexOut.metadata.proofWithout ===
+          codexOut.metadata.proofWith + codexOut.metadata.proofSaved
+      );
+
+      // 12. smartMemoryUpdate is returned by pipeline (memory persistence works for both)
+      assertTrue(
+        "pipeline returns smartMemoryUpdate",
+        result.smartMemoryUpdate !== undefined
+      );
+      assertTrue(
+        "smartMemoryUpdate.decisions is array",
+        Array.isArray(result.smartMemoryUpdate.decisions)
+      );
+
       // ── Report ────────────────────────────────────────────────────────
       console.log(`  taskType        : ${result.taskType}`);
       console.log(`  optimizedTask   : "${result.optimizedTask}"`);

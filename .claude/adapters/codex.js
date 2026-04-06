@@ -85,11 +85,14 @@ function formatCodexContext(result) {
   const instruction = CODEX_INSTRUCTIONS[result.taskType] ?? DEFAULT_INSTRUCTION;
   parts.push(instruction);
 
-  // ── Tool usage constraint (lightweight tasks only) ────────────────────────
-  // toolPolicyBlock is set by lifecycle.js for explanation/formatting/small-edit
-  // tasks. Codex idiom: inline note rather than a bracketed section tag.
+  // ── Tool usage suppression (lightweight tasks only) ──────────────────────
+  // toolPolicyBlock = task-type suppression; toolOptimizationHint = repeated-read hint.
+  // Codex idiom: inline notes rather than Claude-style bracketed section tags.
   if (result.toolPolicyBlock) {
     parts.push("Avoid external tool calls unless strictly required. Reason from context.");
+  }
+  if (result.toolOptimizationHint) {
+    parts.push("This session has repeated file access. Reuse cached understanding unless a fresh read is required.");
   }
 
   // ── Failure awareness (if prior attempts failed) ──────────────────────────
@@ -99,7 +102,8 @@ function formatCodexContext(result) {
 
   const systemPrompt = parts.join("\n\n");
 
-  const lc = result.lifecycleState;
+  const lc    = result.lifecycleState;
+  const proof = result.proofStats ?? {};
 
   return {
     systemPrompt,
@@ -109,11 +113,17 @@ function formatCodexContext(result) {
       originalTokens:        Math.ceil(result.originalChars  / 4),
       optimizedTokens:       Math.ceil(result.optimizedChars / 4),
       cacheHits:             result.cacheHits,
-      savingsLine:           result.savingsLine,
-      // Lifecycle fields — lets Codex callers observe session state
-      lifecycleMode:         lc?.mode              ?? "normal",
-      lifecycleIdleGapMin:   lc?.idleGapMin        ?? "0.0",
+      // V2: proof line (before vs after summary) replaces raw savingsLine
+      savingsLine:           result.proofLine || result.savingsLine,
+      // Lifecycle fields
+      lifecycleMode:         lc?.mode                 ?? "normal",
+      lifecycleIdleGapMin:   lc?.idleGapMin           ?? "0.0",
       lifecycleSavedTokens:  lc?.estimatedSavedTokens ?? 0,
+      // V2: proof engine fields
+      proofWithout:          proof.estimated_total_tokens_without_optimizer ?? 0,
+      proofWith:             proof.estimated_total_tokens_with_optimizer    ?? 0,
+      proofSaved:            proof.estimated_total_tokens_saved             ?? 0,
+      proofEfficiencyPct:    proof.estimated_efficiency_percent             ?? 0,
     },
   };
 }
