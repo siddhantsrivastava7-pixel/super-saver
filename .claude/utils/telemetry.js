@@ -149,14 +149,16 @@ function recordTurn(fields) {
       originalChars = 0,
       cacheHits     = 0,
       relevantFiles = [],
-      updatedSavings,
       lifecycleMode = "normal",
+      turnStats,
     } = fields;
 
-    const state    = loadState();
-    const prevSaved = state.total_estimated_saved_tokens;
-    const nowSaved  = updatedSavings?.total_estimated_saved_tokens ?? 0;
-    const turnSaved = Math.max(0, nowSaved - prevSaved);
+    // turnStats contains the per-turn deltas from savings.js.
+    // Using these instead of session totals means telemetry accumulates correctly
+    // across multiple Claude Code sessions — even when memory.savings resets.
+    const ts = turnStats ?? {};
+    const turnSaved    = ts.total_saved    ?? 0;
+    const optimTokens  = ts.optimized_tokens ?? Math.ceil(originalChars / 4);
 
     const origTokens  = Math.ceil(originalChars / 4);
     const cacheTotal  = relevantFiles.length;
@@ -168,57 +170,44 @@ function recordTurn(fields) {
       ? Math.round((turnSaved / wouldHaveSent) * 100)
       : 0;
 
-    // Per-turn breakdown from updatedSavings (diff from previous state)
-    const prevPromptSaved  = state.prompt_saved_tokens         || 0;
-    const prevHistSaved    = state.history_saved_tokens        || 0;
-    const prevCacheSaved   = state.read_cache_saved_tokens     || 0;
-    const prevPolicySaved  = state.output_policy_saved_tokens  || 0;
-
-    const turnPromptSaved  = Math.max(0, (updatedSavings?.prompt_saved_tokens         || 0) - prevPromptSaved);
-    const turnHistSaved    = Math.max(0, (updatedSavings?.history_saved_tokens        || 0) - prevHistSaved);
-    const turnCacheSaved   = Math.max(0, (updatedSavings?.read_cache_saved_tokens     || 0) - prevCacheSaved);
-    const turnPolicySaved  = Math.max(0, (updatedSavings?.output_policy_saved_tokens  || 0) - prevPolicySaved);
-
-    const turnLifecycleSaved = Math.max(
-      0,
-      (updatedSavings?.lifecycle_saved_tokens || 0) - (state.lifecycle_saved_tokens || 0)
-    );
+    const state = loadState();
 
     appendLog({
-      ts:                    new Date().toISOString(),
-      turn:                  state.prompts_processed + 1,
-      task:                  taskType,
-      saved:                 turnSaved,
-      hits:                  cacheHits,
-      misses:                cacheMisses,
-      pct:                   turnPct,
-      lifecycle_mode:        lifecycleMode,
-      // Breakdown
-      prompt_saved:          turnPromptSaved,
-      history_saved:         turnHistSaved,
-      cache_saved:           turnCacheSaved,
-      policy_saved:          turnPolicySaved,
-      lifecycle_saved:       turnLifecycleSaved,
+      ts:              new Date().toISOString(),
+      turn:            state.prompts_processed + 1,
+      task:            taskType,
+      saved:           turnSaved,
+      hits:            cacheHits,
+      misses:          cacheMisses,
+      pct:             turnPct,
+      lifecycle_mode:  lifecycleMode,
+      // Per-turn breakdown (directly from turnStats — no diff arithmetic needed)
+      prompt_saved:    ts.prompt_saved    ?? 0,
+      history_saved:   ts.history_saved   ?? 0,
+      cache_saved:     ts.cache_saved     ?? 0,
+      policy_saved:    ts.policy_saved    ?? 0,
+      lifecycle_saved: ts.lifecycle_saved ?? 0,
     });
 
+    // Additive accumulation — each field += this turn's contribution.
+    // Never assign session totals here: memory.savings resets each session,
+    // which would silently overwrite the telemetry cross-session running total.
     state.prompts_processed            += 1;
     state.cache_hits                   += cacheHits;
     state.cache_misses                 += cacheMisses;
-    state.total_estimated_saved_tokens  = nowSaved;
     state.savings_pct_sum              += turnPct;
-    // Sync breakdown totals from updatedSavings.
-    // Use ?? not || so a legitimate 0 doesn't fall back to the stale state value.
-    state.prompt_saved_tokens          = updatedSavings?.prompt_saved_tokens         ?? state.prompt_saved_tokens         ?? 0;
-    state.history_saved_tokens         = updatedSavings?.history_saved_tokens        ?? state.history_saved_tokens        ?? 0;
-    state.read_cache_saved_tokens      = updatedSavings?.read_cache_saved_tokens     ?? state.read_cache_saved_tokens     ?? 0;
-    state.output_policy_saved_tokens   = updatedSavings?.output_policy_saved_tokens  ?? state.output_policy_saved_tokens  ?? 0;
-    state.lifecycle_saved_tokens       = updatedSavings?.lifecycle_saved_tokens      ?? state.lifecycle_saved_tokens      ?? 0;
-    state.total_tokens_processed_estimate = updatedSavings?.total_tokens_processed_estimate ?? state.total_tokens_processed_estimate ?? 0;
-    // Increment lifecycle mode counter for this turn
-    if (lifecycleMode === "rebuild")      state.lifecycle_rebuild_turns = (state.lifecycle_rebuild_turns || 0) + 1;
-    else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns || 0) + 1;
-    else                                  state.lifecycle_normal_turns  = (state.lifecycle_normal_turns  || 0) + 1;
-    state.last_updated                  = new Date().toISOString();
+    state.total_estimated_saved_tokens += turnSaved;
+    state.total_tokens_processed_estimate += optimTokens + turnSaved;
+    state.prompt_saved_tokens          += ts.prompt_saved    ?? 0;
+    state.history_saved_tokens         += ts.history_saved   ?? 0;
+    state.read_cache_saved_tokens      += ts.cache_saved     ?? 0;
+    state.output_policy_saved_tokens   += ts.policy_saved    ?? 0;
+    state.lifecycle_saved_tokens       += ts.lifecycle_saved ?? 0;
+    // Lifecycle mode counters
+    if (lifecycleMode === "rebuild")      state.lifecycle_rebuild_turns = (state.lifecycle_rebuild_turns ?? 0) + 1;
+    else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns ?? 0) + 1;
+    else                                  state.lifecycle_normal_turns  = (state.lifecycle_normal_turns  ?? 0) + 1;
+    state.last_updated = new Date().toISOString();
     saveState(state);
 
   } catch {

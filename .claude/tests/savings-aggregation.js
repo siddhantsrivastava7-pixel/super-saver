@@ -288,6 +288,73 @@ section("10. formatDetailedSavings — drift check passes");
     "no DRIFT warning in detail output");
 }
 
+section("11. turnStats — per-turn deltas are correct");
+{
+  const seed = {
+    prompts_processed:            3,
+    prompt_saved_tokens:          10,
+    history_saved_tokens:         540,
+    read_cache_saved_tokens:      400,
+    output_policy_saved_tokens:   50,
+    lifecycle_saved_tokens:       2000,
+    total_estimated_saved_tokens: 3000,
+    total_original_tokens:        1800,
+    total_optimized_tokens:       1700,
+    total_tokens_processed_estimate: 4700,
+    total_cache_hits:             1,
+    lifecycle_mode:               "normal",
+  };
+
+  const s = updateSavings(seed, {
+    originalChars:        400,
+    optimizedChars:       380,   // 5 tokens saved
+    messagesCompressed:   2,     // 2 × 180 = 360
+    cacheHits:            1,     // 1 × 400 = 400
+    taskType:             "code-fix",   // policy: 50
+    lifecycleMode:        "normal",
+    lifecycleTokensSaved: 0,
+  });
+
+  const ts = s.turnStats;
+  assert(ts !== undefined, "turnStats is present in result");
+  assert(ts.prompt_saved    === 5,   `prompt_saved = 5 (got ${ts.prompt_saved})`);
+  assert(ts.history_saved   === 360, `history_saved = 360 (got ${ts.history_saved})`);
+  assert(ts.cache_saved     === 400, `cache_saved = 400 (got ${ts.cache_saved})`);
+  assert(ts.policy_saved    === 50,  `policy_saved = 50 (got ${ts.policy_saved})`);
+  assert(ts.lifecycle_saved === 0,   `lifecycle_saved = 0 (got ${ts.lifecycle_saved})`);
+
+  const expectedTurnTotal = 5 + 360 + 400 + 50 + 0;
+  assert(ts.total_saved === expectedTurnTotal,
+    `total_saved = ${expectedTurnTotal} (got ${ts.total_saved})`);
+
+  // turnStats.total_saved === cumulative delta
+  const prevTotal = 3000;
+  assert(s.total_estimated_saved_tokens - prevTotal === ts.total_saved,
+    "cumulative total increased by exactly total_saved");
+}
+
+section("12. turnStats survives session reset (additive safety)");
+{
+  // Simulate a session reset: seed has large accumulated totals (prior session)
+  // but this call starts with undefined (fresh session memory)
+  const s1 = updateSavings(undefined, {
+    originalChars:      500,
+    optimizedChars:     450,
+    messagesCompressed: 1,
+    cacheHits:          1,
+    taskType:           "code-fix",
+    lifecycleMode:      "rebuild",
+    lifecycleTokensSaved: 2000,
+  });
+
+  // turnStats should reflect THIS turn only, not any prior session state
+  const ts = s1.turnStats;
+  assert(ts.lifecycle_saved === 2000, `turnStats.lifecycle_saved = 2000 after rebuild (got ${ts.lifecycle_saved})`);
+  assert(ts.cache_saved     === 400,  `turnStats.cache_saved = 400 (got ${ts.cache_saved})`);
+  assert(ts.total_saved     === ts.prompt_saved + ts.history_saved + ts.cache_saved + ts.policy_saved + ts.lifecycle_saved,
+    "turnStats.total_saved = sum of components");
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

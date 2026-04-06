@@ -217,6 +217,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       taskType, originalChars, optimizedChars, cacheHits,
       relevantFiles, updatedSavings,
       lifecycleMode: lifecycle.mode,
+      turnStats: updatedSavings?.turnStats,
     });
   } catch {}
 

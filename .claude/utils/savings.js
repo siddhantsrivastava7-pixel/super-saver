@@ -141,6 +141,25 @@ function updateSavings(currentSavings, stats) {
 
     // Last-turn mode (non-cumulative; for telemetry/debugging):
     lifecycle_mode:                  stats.lifecycleMode || "normal",
+
+    // Per-turn contributions — used by telemetry for additive accumulation.
+    // These are the raw deltas for THIS TURN ONLY, not cumulative session totals.
+    // Telemetry must use these (not session totals) so it survives session resets.
+    turnStats: {
+      prompt_saved:    savedTokens,
+      history_saved:   compressionSaved,
+      cache_saved:     cacheSaved,
+      policy_saved:    policySaved,
+      lifecycle_saved: lifecycleSaved,
+      total_saved:     newTotal - (
+        (s.prompt_saved_tokens       ?? 0) +
+        (s.history_saved_tokens      ?? 0) +
+        (s.read_cache_saved_tokens   ?? 0) +
+        (s.output_policy_saved_tokens ?? 0) +
+        (s.lifecycle_saved_tokens    ?? 0)
+      ),
+      optimized_tokens: optimizedTokens,
+    },
   };
 }
 
