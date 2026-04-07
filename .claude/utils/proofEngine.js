@@ -43,14 +43,20 @@
  * }}
  */
 function computeSessionProof(savings) {
-  // with = what was actually sent (optimized tokens across all turns)
-  const total_with  = Math.max(0, savings?.total_optimized_tokens ?? 0);
+  // with = what was actually sent: optimized prompt tokens + additionalContext tokens.
+  // Prefer the new total_with_tokens (set when additionalContextChars is tracked).
+  // Fall back to total_optimized_tokens for sessions that predate the fix — those
+  // sessions will still show inflated efficiency, but new sessions will be honest.
+  const total_with = Math.max(
+    0,
+    savings?.total_with_tokens ?? savings?.total_optimized_tokens ?? 0
+  );
 
   // saved = accumulation of all five savings categories
   const total_saved = Math.max(0, savings?.total_estimated_saved_tokens ?? 0);
 
-  // without = what would have been sent without any optimization
-  // Guaranteed: without >= with, without - with === saved
+  // without = what would have been sent without any optimization.
+  // Derived: without = with + saved. Invariant: without >= with.
   const total_without = total_with + total_saved;
 
   // efficiency = fraction of would-be tokens that were cut
@@ -83,7 +89,10 @@ function computeSessionProof(savings) {
  * }}
  */
 function computeTurnProof({ optimizedChars = 0, turnStats = {} }) {
-  const with_tokens    = Math.ceil(optimizedChars / 4);
+  const prompt_tokens  = Math.ceil(optimizedChars / 4);
+  // Include per-turn additionalContext chars (tracked since V4 fix).
+  const context_tokens = Math.ceil((turnStats?.additional_context_chars ?? 0) / 4);
+  const with_tokens    = prompt_tokens + context_tokens;
   const saved_tokens   = Math.max(0, turnStats?.total_saved ?? 0);
   const without_tokens = with_tokens + saved_tokens;
   return { without_tokens, with_tokens, saved_tokens };

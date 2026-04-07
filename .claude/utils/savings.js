@@ -76,13 +76,15 @@ function computePromptSavings(originalChars, optimizedChars) {
  *
  * @param {object} currentSavings  - memory.savings (may be undefined on first run)
  * @param {{
- *   originalChars:         number,
- *   optimizedChars:        number,
- *   messagesCompressed:    number,  — actual count from compressor (0 if no transcript)
- *   cacheHits:             number,
- *   taskType?:             string,
- *   lifecycleMode?:        "normal"|"compact"|"rebuild",
- *   lifecycleTokensSaved?: number,
+ *   originalChars:           number,
+ *   optimizedChars:          number,
+ *   messagesCompressed:      number,  — actual count from compressor (0 if no transcript)
+ *   cacheHits:               number,
+ *   additionalContextChars?: number,  — chars of all injected context blocks this turn
+ *   taskType?:               string,
+ *   lifecycleMode?:          "normal"|"compact"|"rebuild",
+ *   lifecycleTokensSaved?:   number,
+ *   outputPolicyEstimated?:  number,  — estimated tokens saved by output policy this turn
  * }} stats
  * @returns {object} Updated savings object
  */
@@ -97,7 +99,11 @@ function updateSavings(currentSavings, stats) {
 
   const compressionSaved = (stats.messagesCompressed || 0) * TOKENS_PER_COMPRESSED_MSG;
   const cacheSaved       = (stats.cacheHits          || 0) * TOKENS_PER_CACHE_HIT;
-  const policySaved      = (stats.taskType || "default") !== "default" ? TOKENS_PER_POLICY : 0;
+  // Use outputPolicyEstimated from the policy (varies by task type) if provided,
+  // otherwise fall back to the flat TOKENS_PER_POLICY constant for non-default tasks.
+  const policySaved      = stats.outputPolicyEstimated != null
+    ? (stats.outputPolicyEstimated || 0)
+    : ((stats.taskType || "default") !== "default" ? TOKENS_PER_POLICY : 0);
   const lifecycleSaved   = stats.lifecycleTokensSaved || 0;
 
   // Accumulate each category using ?? so a legitimate 0 doesn't fall back to a
@@ -112,13 +118,22 @@ function updateSavings(currentSavings, stats) {
   // Any old total carried over from a pre-breakdown schema is discarded.
   const newTotal = newPromptSaved + newHistSaved + newCacheSaved + newPolicySaved + newLifeSaved;
 
-  const newOriginalTokens  = (s.total_original_tokens  ?? 0) + originalTokens;
-  const newOptimizedTokens = (s.total_optimized_tokens ?? 0) + optimizedTokens;
+  const newOriginalTokens   = (s.total_original_tokens          ?? 0) + originalTokens;
+  const newOptimizedTokens  = (s.total_optimized_tokens         ?? 0) + optimizedTokens;
+  // Track actual additionalContext chars injected this turn.
+  // This is the honest "tokens we sent with the optimizer" — prompt text PLUS all
+  // context blocks (output policy, history, file cache, etc.).  Without this the
+  // denominator is only the tiny filler-removed prompt, making efficiency look ~98%.
+  const contextCharsThisTurn  = stats.additionalContextChars || 0;
+  const newAdditionalCtxChars = (s.total_additional_context_chars ?? 0) + contextCharsThisTurn;
 
-  // total_tokens_processed_estimate = what would have been sent without optimization.
-  // = tokens actually sent (optimized) + tokens saved by all mechanisms.
-  // Efficiency % = newTotal / total_tokens_processed_estimate * 100.
-  const newProcessedEstimate = newOptimizedTokens + newTotal;
+  // total_with_tokens = what was actually sent with the optimizer each turn:
+  //   optimized prompt tokens + additionalContext tokens
+  const newWithTokens = newOptimizedTokens + Math.ceil(newAdditionalCtxChars / CHARS_PER_TOKEN);
+
+  // total_tokens_processed_estimate = without-optimizer cost:
+  //   what we actually sent PLUS everything we saved by optimizing.
+  const newProcessedEstimate = newWithTokens + newTotal;
 
   return {
     prompts_processed:               (s.prompts_processed ?? 0) + 1,
@@ -127,6 +142,10 @@ function updateSavings(currentSavings, stats) {
     // Token counts
     total_original_tokens:           newOriginalTokens,
     total_optimized_tokens:          newOptimizedTokens,
+    // Total chars of all injected additionalContext across turns
+    total_additional_context_chars:  newAdditionalCtxChars,
+    // Honest "tokens sent with optimizer" = prompt tokens + context tokens
+    total_with_tokens:               newWithTokens,
     total_tokens_processed_estimate: newProcessedEstimate,
 
     // Total — always exactly the sum of the five breakdown fields below.
@@ -146,19 +165,21 @@ function updateSavings(currentSavings, stats) {
     // These are the raw deltas for THIS TURN ONLY, not cumulative session totals.
     // Telemetry must use these (not session totals) so it survives session resets.
     turnStats: {
-      prompt_saved:    savedTokens,
-      history_saved:   compressionSaved,
-      cache_saved:     cacheSaved,
-      policy_saved:    policySaved,
-      lifecycle_saved: lifecycleSaved,
-      total_saved:     newTotal - (
-        (s.prompt_saved_tokens       ?? 0) +
-        (s.history_saved_tokens      ?? 0) +
-        (s.read_cache_saved_tokens   ?? 0) +
+      prompt_saved:             savedTokens,
+      history_saved:            compressionSaved,
+      cache_saved:              cacheSaved,
+      policy_saved:             policySaved,
+      lifecycle_saved:          lifecycleSaved,
+      total_saved:              newTotal - (
+        (s.prompt_saved_tokens        ?? 0) +
+        (s.history_saved_tokens       ?? 0) +
+        (s.read_cache_saved_tokens    ?? 0) +
         (s.output_policy_saved_tokens ?? 0) +
-        (s.lifecycle_saved_tokens    ?? 0)
+        (s.lifecycle_saved_tokens     ?? 0)
       ),
-      optimized_tokens: optimizedTokens,
+      optimized_tokens:         optimizedTokens,
+      // Per-turn context tokens for accurate per-turn proof
+      additional_context_chars: contextCharsThisTurn,
     },
   };
 }
@@ -221,7 +242,9 @@ function formatDetailedSavings(savings) {
     `Prompts processed         : ${savings.prompts_processed}`,
     `Original tokens (est)     : ${savings.total_original_tokens || 0}`,
     `Optimized tokens (est)    : ${savings.total_optimized_tokens || 0}`,
-    `Total processed (est)     : ${savings.total_tokens_processed_estimate || 0}`,
+    `AdditionalContext (chars)  : ${savings.total_additional_context_chars || 0}`,
+    `Tokens sent with optimizer : ${savings.total_with_tokens || 0}`,
+    `Total without optimizer    : ${savings.total_tokens_processed_estimate || 0}`,
     ``,
     `Total tokens saved        : ${total}`,
     `  prompt_saved            : ${savings.prompt_saved_tokens        || 0}`,

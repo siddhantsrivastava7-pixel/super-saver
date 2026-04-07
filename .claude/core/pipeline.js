@@ -260,11 +260,28 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
   let updatedSavings = memory.savings;
   let savingsLine    = "";
   try {
+    // Measure the actual additionalContext we're injecting this turn.
+    // This is the honest "tokens sent with the optimizer" denominator that was
+    // previously missing — the old code only counted the tiny filler-removed prompt,
+    // causing efficiency to show ~98% instead of a realistic figure.
+    const additionalContextChars = [
+      optimizedTask,
+      contextBlock,
+      fileCacheBlock,
+      outputPolicyBlock,
+      toolPolicyBlock,
+      toolOptimizationHint,
+      outputWasteFeedback,
+      retryBlock,
+      verificationSuggestion,
+    ].filter(Boolean).reduce((sum, s) => sum + s.length, 0);
+
     updatedSavings = updateSavings(memory.savings, {
       originalChars,
       optimizedChars,
       messagesCompressed,
       cacheHits,
+      additionalContextChars,
       taskType,
       lifecycleMode:           lifecycle.mode,
       lifecycleTokensSaved:    lifecycle.estimatedSavedTokens,
