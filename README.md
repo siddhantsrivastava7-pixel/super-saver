@@ -1,4 +1,4 @@
-# 🚀 SUPER SAVER v2
+# 🚀 SUPER SAVER v5
 
 ### Save **50–70% tokens** in Claude Code — automatically
 
@@ -14,6 +14,7 @@ Most token waste isn't the model — it's **context**.
 * Same file gets read again and again
 * Long chats become bloated and expensive
 * Decisions and constraints get forgotten between turns
+* **Wrong session mode** — Claude drags old execution context into a brand-new task
 
 👉 You're often wasting **40–70% tokens** without realizing it
 
@@ -53,6 +54,12 @@ It works silently in the background.
 
 * 🔧 **Tool Awareness Engine** *(v2)*
   (suppresses unnecessary tool calls on simple tasks, tracks impact)
+
+* 🗑️ **Output Waste Analyzer** *(v4)*
+  (detects redundant prose in prior responses and prevents recurrence)
+
+* 🧭 **Session Strategy Engine** *(v5)*
+  (detects task intent shifts and adjusts context mode automatically)
 
 ---
 
@@ -139,6 +146,8 @@ Tracked per-session:
 | `"we'll use TypeScript"` | ✅ yes |
 | `"thinking about switching to Redis"` | ❌ no — speculative |
 
+**Memory decay** *(v3)*: each item carries a confidence score that decays 0.03/turn. Items below 0.15 are pruned. Superseded items (contradicted by newer decisions) are filtered from context.
+
 When an idle gap is detected, rebuild mode uses this structured memory instead of raw history:
 
 ```
@@ -176,6 +185,8 @@ total_without = total_with + total_saved
 efficiency %  = total_saved / total_without × 100
 ```
 
+`total_with` includes both the optimized prompt AND all injected context blocks — so efficiency reflects the full cost of running the optimizer, not just filler removal.
+
 Per-turn deltas are visible in the telemetry log:
 
 ```jsonl
@@ -204,12 +215,64 @@ This session has repeated file access.
 Reuse cached understanding unless a fresh read is required.
 ```
 
-**Token impact tracked:**
+---
 
-| Field | Meaning |
+## 🗑️ v4: Output Waste Analyzer
+
+Detects redundant content in Claude's *previous* response and injects feedback before the next turn — telling Claude to skip it this time.
+
+**Five waste categories detected:**
+
+| Category | Example |
 |---|---|
-| `estimated_tool_cost_tokens` | What tool calls would cost (cumulative) |
-| `estimated_suppression_saved` | What suppression prevented on lightweight turns |
+| Preamble | "Sure! I'll help you with that..." |
+| Repeated context | Restating what the user just said |
+| Unnecessary prose | "It's worth noting that..." |
+| Avoidable explanation | Explaining obvious stdlib behavior |
+| Verbose structure | Markdown headers for a 2-line answer |
+
+Feedback is only injected when estimated waste exceeds 20 tokens. The feedback block itself is 3 lines — modeling the terse output it requests.
+
+**`follow-up` task type**: when a correction is detected (short prompt + correction phrase), switches to delta-only mode — only the change, nothing restated.
+
+---
+
+## 🧭 v5: Session Strategy Engine
+
+Solves a subtler waste: **using the wrong session mode for the task**.
+
+Lifecycle handles *when* (idle gap, session length). Strategy handles *what kind* of session this is.
+
+### Five session modes
+
+| Mode | Trigger | Context behavior |
+|---|---|---|
+| `continuation` | Same intent, same files | Full compressed history, all decisions |
+| `fresh-task` | New intent, low similarity | Clear execution history, keep constraints only |
+| `same-files` | Same codebase area, different goal | Keep file knowledge, drop task decisions |
+| `exploration` | Architectural / design work | Wide context (LOW compression), keep decisions |
+| `execution` | Narrow targeted fix | Tight context (HIGH compression), focused |
+
+### Task similarity scoring
+
+Five weighted signals determine whether the current task is a continuation or a shift:
+
+| Signal | Weight | What it measures |
+|---|---|---|
+| Verb category alignment | 0.30 | execution vs exploration verbs |
+| File overlap | 0.25 | shared file mentions vs memory |
+| Task type consistency | 0.20 | same outputPolicy classification |
+| Word overlap | 0.15 | 4+ char keyword reuse |
+| Scope alignment | 0.10 | broad vs narrow intent |
+
+When a mode change is detected, Claude sees:
+
+```
+[SESSION MODE]
+New task detected — execution history cleared. Project constraints preserved.
+```
+
+**Task-shift reset**: `fresh-task` mode triggers `applyTaskShiftReset` — clears `known_issues`, decays `decisions` by 0.4× confidence, preserves `constraints`.
 
 ---
 
@@ -224,6 +287,8 @@ Reuse cached understanding unless a fresh read is required.
 | Lifecycle compact | ~360 | Long sessions |
 | Tool suppression | ~200/call | Simple tasks |
 | Output shaping | ~50 | Non-default task types |
+| Output waste feedback | ~80 | Redundant prior response |
+| Session strategy | varies | Wrong-mode prevention |
 
 ---
 
@@ -239,13 +304,16 @@ Reuse cached understanding unless a fresh read is required.
   hooks/
     beforePrompt.js     # UserPromptSubmit entrypoint
   utils/
+    sessionStrategy.js  # v5: 5-mode session strategy engine
+    outputWaste.js      # v4: post-response redundancy analyzer
+    outputPolicy.js     # task-aware output shaping + follow-up mode
     smartMemory.js      # v2: structured memory extraction
+    memoryDecay.js      # v3: MemoryItem confidence decay + supersede
     proofEngine.js      # v2: before/after token proof
     toolTracker.js      # v2: tool suppression + impact
     lifecycle.js        # idle gap + compact mode detection
     compressor.js       # conversation history compression
     diffPolicy.js       # file read deduplication
-    outputPolicy.js     # task-aware output shaping
     savings.js          # token savings accumulation
     telemetry.js        # observability layer
     memory.js           # persistent session memory
@@ -269,15 +337,18 @@ Reuse cached understanding unless a fresh read is required.
 npm test
 ```
 
-218 tests across 9 suites — all should pass.
+395+ tests across 12 suites — all should pass.
 
 Or run individual suites:
 
 ```bash
-node .claude/tests/smart-memory.js    # 54 tests — memory extraction + confidence filter
-node .claude/tests/proof-engine.js    # 28 tests — before/after invariants
-node .claude/tests/tool-awareness.js  # 42 tests — suppression + impact
-node .claude/tests/lifecycle.js       # 16 tests — rebuild/compact modes
+node .claude/tests/session-strategy.js  # 77 tests — 5-mode strategy engine
+node .claude/tests/output-waste.js      # 60 tests — redundancy detection
+node .claude/tests/memory-decay.js      # 72 tests — confidence decay + supersede
+node .claude/tests/smart-memory.js      # 75 tests — memory extraction + confidence filter
+node .claude/tests/proof-engine.js      # 28 tests — before/after invariants
+node .claude/tests/tool-awareness.js    # 42 tests — suppression + impact
+node .claude/tests/lifecycle.js         # 16 tests — rebuild/compact modes
 node .claude/tests/savings-aggregation.js  # 39 tests — math invariants
 ```
 
