@@ -371,21 +371,30 @@ function extractSmartMemory(prompt, currentTurn = 0) {
 /**
  * Build a structured [SESSION REBUILD] context block from rich session memory.
  *
- * V3: uses toActiveValues(items, currentTurn) to filter by effective confidence
- * before rendering. Items that have decayed, been superseded, or fall below
- * PRUNE_THRESHOLD are silently excluded from the rebuild block.
+ * V3: uses toActiveValues(items, currentTurn) to filter by effective confidence.
+ * V5: accepts contextStrategy from sessionStrategy.js — when the session mode
+ *     is fresh-task/same-files/exploration/execution, the rebuild block is
+ *     filtered to only include what's relevant for that mode.
  *
- * Backward compat: string[] arrays (legacy sessions) pass through toActiveValues
- * unchanged — they are always included (no decay metadata available).
+ * contextStrategy.includeDecisions  — false in fresh-task, same-files
+ * contextStrategy.includeIssues     — false in fresh-task, same-files, exploration
+ * contextStrategy.rebuildDepth      — "constraints-only" | "files-only" |
+ *                                     "decisions-and-constraints" | "minimal" | "full"
  *
- * @param {object} memory       — full session memory (v2+/v3 schema)
- * @param {number} currentTurn  — current turn for decay computation (default 0)
+ * @param {object} memory          — full session memory (v2+/v3 schema)
+ * @param {number} currentTurn     — current turn for decay computation (default 0)
+ * @param {object|null} contextStrategy — from analyzeSessionStrategy() (optional)
  * @returns {string}
  */
-function buildStructuredRebuildContext(memory, currentTurn = 0) {
+function buildStructuredRebuildContext(memory, currentTurn = 0, contextStrategy = null) {
+  const cs = contextStrategy ?? {};
+  const includeDecisions = cs.includeDecisions !== false;  // default true
+  const includeIssues    = cs.includeIssues    !== false;  // default true
+  const depth            = cs.rebuildDepth ?? "full";
+
   const lines = ["[SESSION REBUILD]"];
 
-  // ── Core identity ─────────────────────────────────────────────────────────
+  // ── Core identity — always included ──────────────────────────────────────
   if (memory.goal) {
     lines.push(`Goal: ${memory.goal}`);
   }
@@ -393,42 +402,55 @@ function buildStructuredRebuildContext(memory, currentTurn = 0) {
     lines.push(`Current Task: ${memory.current_task}`);
   }
 
-  // ── Key Decisions — filtered by effective confidence ──────────────────────
-  const decisions = toActiveValues(memory.decisions ?? [], currentTurn);
-  if (decisions.length > 0) {
-    lines.push("\nKey Decisions:");
-    decisions.slice(-5).forEach((d) => lines.push(`* ${d}`));
+  // ── Key Decisions — filtered by strategy + confidence decay ──────────────
+  if (includeDecisions && depth !== "constraints-only" && depth !== "files-only") {
+    const decisions = toActiveValues(memory.decisions ?? [], currentTurn);
+    if (decisions.length > 0) {
+      lines.push("\nKey Decisions:");
+      // exploration/full: last 5; minimal: last 2
+      const limit = depth === "minimal" ? 2 : 5;
+      decisions.slice(-limit).forEach((d) => lines.push(`* ${d}`));
+    }
   }
 
-  // ── Constraints — filtered (kept unless decayed or superseded) ─────────────
-  const constraints = toActiveValues(memory.constraints ?? [], currentTurn);
-  if (constraints.length > 0) {
-    lines.push("\nConstraints:");
-    constraints.forEach((c) => lines.push(`* ${c}`));
+  // ── Constraints — always included (project-wide rules survive mode changes) ─
+  if (depth !== "files-only") {
+    const constraints = toActiveValues(memory.constraints ?? [], currentTurn);
+    if (constraints.length > 0) {
+      lines.push("\nConstraints:");
+      constraints.forEach((c) => lines.push(`* ${c}`));
+    }
   }
 
-  // ── Known Issues — filtered (cleared on task shift by applyTaskShiftReset) ─
-  const issues = toActiveValues(memory.known_issues ?? [], currentTurn);
-  if (issues.length > 0) {
-    lines.push("\nKnown Issues:");
-    issues.forEach((i) => lines.push(`* ${i}`));
+  // ── Known Issues — filtered by strategy ──────────────────────────────────
+  if (includeIssues && (depth === "full" || depth === "minimal")) {
+    const issues = toActiveValues(memory.known_issues ?? [], currentTurn);
+    if (issues.length > 0) {
+      lines.push("\nKnown Issues:");
+      issues.forEach((i) => lines.push(`* ${i}`));
+    }
   }
 
-  // ── Important Files (merge smart + recent; recent_files is always string[]) ─
-  const smartFiles  = toActiveValues(memory.important_files ?? [], currentTurn);
-  const recentFiles = (memory.recent_files ?? []).filter((f) => typeof f === "string");
-  const allFiles    = mergeArrays(smartFiles, recentFiles, 6);
-  if (allFiles.length > 0) {
-    lines.push("\nImportant Files:");
-    allFiles.forEach((f) => lines.push(`* ${f}`));
+  // ── Important Files — always included (file knowledge transcends tasks) ───
+  if (depth !== "constraints-only") {
+    const smartFiles  = toActiveValues(memory.important_files ?? [], currentTurn);
+    const recentFiles = (memory.recent_files ?? []).filter((f) => typeof f === "string");
+    const fileLimit   = depth === "files-only" ? 10 : 6;
+    const allFiles    = mergeArrays(smartFiles, recentFiles, fileLimit);
+    if (allFiles.length > 0) {
+      lines.push("\nImportant Files:");
+      allFiles.forEach((f) => lines.push(`* ${f}`));
+    }
   }
 
-  // ── Summary / Pattern ─────────────────────────────────────────────────────
-  if (memory.last_summary) {
-    lines.push(`\nLast Summary: ${memory.last_summary}`);
-  }
-  if (memory.last_successful_pattern) {
-    lines.push(`Last Successful Pattern: ${memory.last_successful_pattern}`);
+  // ── Summary / Pattern — only in full/decisions depth ─────────────────────
+  if (depth === "full" || depth === "decisions-and-constraints") {
+    if (memory.last_summary) {
+      lines.push(`\nLast Summary: ${memory.last_summary}`);
+    }
+    if (memory.last_successful_pattern) {
+      lines.push(`Last Successful Pattern: ${memory.last_successful_pattern}`);
+    }
   }
 
   // ── Fallback ──────────────────────────────────────────────────────────────

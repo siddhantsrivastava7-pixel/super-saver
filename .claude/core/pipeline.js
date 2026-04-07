@@ -62,6 +62,8 @@ const {
 }                                              = require(path.join(UTILS, "lifecycle.js"));
 const { extractSmartMemory }                   = require(path.join(UTILS, "smartMemory.js"));
 const { detectTaskShift }                      = require(path.join(UTILS, "memoryDecay.js"));
+const { analyzeSessionStrategy }               = require(path.join(UTILS, "sessionStrategy.js"));
+const { classifyTaskType }                     = require(path.join(UTILS, "outputPolicy.js"));
 const { computeSessionProof, formatProofLine } = require(path.join(UTILS, "proofEngine.js"));
 const { analyzeToolBehavior }                  = require(path.join(UTILS, "toolTracker.js"));
 const {
@@ -72,6 +74,14 @@ const {
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
 async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn }) {
+
+  // ── Step 2a: Quick task pre-classification (for session strategy) ────────
+  // Runs before lifecycle so the strategy can override compression level.
+  // The official taskType is determined in step 7; this is only for strategy.
+  let quickTaskType = "default";
+  try {
+    quickTaskType = classifyTaskType(prompt);
+  } catch {}
 
   // ── Step 2b: Lifecycle state detection ───────────────────────────────────
   // Must run BEFORE compression so compression level and context mode are known.
@@ -84,6 +94,31 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     lifecycle = detectLifecycleState(memory, currentTurn);
   } catch {
     // Non-fatal — proceed with defaults
+  }
+
+  // ── Step 2b.5: Session strategy analysis ─────────────────────────────────
+  // Determines the strategic session mode based on task intent shift — not just
+  // timing (lifecycle) but what KIND of work this is vs. the previous task.
+  // Can override the compression level when the task context warrants it
+  // (e.g., exploration → LOW, fresh-task → HIGH, even in a short session).
+  // Does NOT fire when lifecycle is in rebuild mode (rebuild takes precedence).
+  let sessionStrategy = { sessionMode: "continuation", isModeChange: false, note: "",
+    contextStrategy: { compressionOverride: null, includeDecisions: true, includeIssues: true,
+      rebuildDepth: "full", triggerReset: false } };
+  try {
+    sessionStrategy = analyzeSessionStrategy(prompt, quickTaskType, memory, currentTurn);
+    // Let strategy override compression level, but don't fight a lifecycle rebuild.
+    if (
+      sessionStrategy.contextStrategy.compressionOverride &&
+      lifecycle.mode !== "rebuild"
+    ) {
+      lifecycle = {
+        ...lifecycle,
+        compressionLevel: sessionStrategy.contextStrategy.compressionOverride,
+      };
+    }
+  } catch {
+    // Non-fatal
   }
 
   // ── Step 2c: Smart memory extraction + task shift detection ─────────────
@@ -116,7 +151,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     if (lifecycle.mode === "rebuild") {
       // Replace full history with a minimal, memory-derived context block.
       // This is the core token-saving mechanism for idle gap turns.
-      contextBlock = buildRebuildContext(memory, currentTurn);
+      contextBlock = buildRebuildContext(memory, currentTurn, sessionStrategy.contextStrategy);
       // messagesCompressed = 0 (no transcript read — savings tracked via lifecycle)
     } else {
       const compression = compressHistory(transcriptPath, prompt, {
@@ -365,6 +400,9 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // V4: Output waste analysis (prior response redundancy stats + feedback block)
     outputWasteStats,
     outputWasteFeedback,
+
+    // V5: Session strategy (mode + context strategy + optional note)
+    sessionStrategy,
   };
 }
 

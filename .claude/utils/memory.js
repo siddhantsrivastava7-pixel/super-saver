@@ -90,6 +90,10 @@ function defaultMemory() {
     last_turn_timestamp: 0,
     idle_gap_ms:         0,
     session_mode:        "normal",
+    // V5: Last classified task type — used by session strategy for next-turn comparison
+    last_task_type:      "default",
+    // V5: Last session strategy mode — for telemetry/debugging
+    last_session_mode:   "continuation",
     savings: {
       prompts_processed:            0,
       total_estimated_saved_tokens: 0,
@@ -226,6 +230,14 @@ function applyUpdates(mem, updates) {
     mem.session_mode        = updates.lifecycleState.mode       || "normal";
   }
 
+  // V5: Store last task type and session mode for next-turn strategy comparison.
+  if (updates.taskType) {
+    mem.last_task_type    = updates.taskType;
+  }
+  if (updates.sessionMode) {
+    mem.last_session_mode = updates.sessionMode;
+  }
+
   // V3: Smart memory — merge extracted MemoryItem[] into existing items with
   // confidence decay, superseded detection, and prune. Handles legacy string[]
   // in existing memory transparently via normalizeToItems().
@@ -234,8 +246,9 @@ function applyUpdates(mem, updates) {
     const turn = updates.currentTurn ?? 0;
 
     // Task shift: reset task-specific memory BEFORE merging new items.
+    // Triggers on V3 word-overlap detection OR V5 session strategy fresh-task mode.
     // applyTaskShiftReset clears known_issues and decays decisions × 0.4.
-    if (sm.taskShifted) {
+    if (sm.taskShifted || updates.strategyTriggeredReset) {
       applyTaskShiftReset(mem, updates.prompt || "", turn);
     }
 

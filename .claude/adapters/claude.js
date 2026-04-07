@@ -59,6 +59,13 @@ function formatClaudeContext(result) {
     sections.push(result.toolOptimizationHint);
   }
 
+  // Session mode change — injected when strategy detects a task shift.
+  // Only shown when mode changed (isModeChange=true) and a note is available.
+  // Signals to Claude that prior execution context has been cleared/filtered.
+  if (result.sessionStrategy?.isModeChange && result.sessionStrategy?.note) {
+    sections.push(`[SESSION MODE]\n${result.sessionStrategy.note}`);
+  }
+
   // Output waste feedback — injected when prior response had significant redundancy.
   // Kept to 3 lines so the feedback itself models terse output.
   if (result.outputWasteFeedback) {

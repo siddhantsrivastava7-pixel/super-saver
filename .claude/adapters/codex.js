@@ -127,6 +127,10 @@ function formatCodexContext(result) {
       // V4: Output waste
       outputWasteTokens:     result.outputWasteStats?.output_tokens_redundant ?? 0,
       outputWasteReason:     result.outputWasteStats?.top_reason              ?? "none",
+      // V5: Session strategy
+      sessionMode:           result.sessionStrategy?.sessionMode              ?? "continuation",
+      taskSimilarity:        result.sessionStrategy?.taskSimilarity           ?? 1,
+      sessionModeChanged:    result.sessionStrategy?.isModeChange             ?? false,
     },
   };
 }
