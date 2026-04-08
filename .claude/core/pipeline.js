@@ -70,6 +70,7 @@ const {
   analyzeOutputWaste,
   formatWasteFeedback,
 }                                              = require(path.join(UTILS, "outputWaste.js"));
+const { routeTurn }                            = require(path.join(UTILS, "modelRouter.js"));
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
@@ -261,6 +262,29 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
     // Non-fatal
   }
 
+  // ── Step 7.5: Model routing ───────────────────────────────────────────────
+  // Classifies risk from task type + prompt + file count, then selects the
+  // optimal model tier and reasoning level for Codex, and generates a short
+  // advisory hint for Claude. Reads the previous turn's response to detect
+  // weak output — if detected, next-turn escalation fires via lastTurnFailed.
+  // Non-fatal: defaults to medium tier on any error.
+  let routingResult = {
+    risk: "medium", confidence: 0.5, signals: [],
+    model: null, reasoning: "medium", tier: "medium", escalated: false,
+    suggestion: "", isWeak: false, weakSignals: [],
+  };
+  try {
+    routingResult = routeTurn({
+      taskType,
+      prompt,
+      files:          relevantFiles,
+      transcriptPath,
+      lastTurnFailed: memory.last_turn_failed ?? false,
+    });
+  } catch {
+    // Non-fatal
+  }
+
   // ── Step 8.5: Output waste analysis ──────────────────────────────────────
   // Analyze the PREVIOUS turn's assistant response for redundancy patterns.
   // When waste is detected, formatWasteFeedback() produces a short 3-line block
@@ -309,6 +333,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       outputWasteFeedback,
       retryBlock,
       verificationSuggestion,
+      routingResult.suggestion,
     ].filter(Boolean).reduce((sum, s) => sum + s.length, 0);
 
     updatedSavings = updateSavings(memory.savings, {
@@ -348,6 +373,7 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       proofStats,
       toolStats,
       outputWasteStats,
+      routingResult,
     });
   } catch {}
 
@@ -403,6 +429,9 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
 
     // V5: Session strategy (mode + context strategy + optional note)
     sessionStrategy,
+
+    // Model router (risk classification + model/reasoning selection)
+    routingResult,
   };
 }
 

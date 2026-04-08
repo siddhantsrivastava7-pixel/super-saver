@@ -131,6 +131,11 @@ function formatCodexContext(result) {
       sessionMode:           result.sessionStrategy?.sessionMode              ?? "continuation",
       taskSimilarity:        result.sessionStrategy?.taskSimilarity           ?? 1,
       sessionModeChanged:    result.sessionStrategy?.isModeChange             ?? false,
+      // Model router
+      modelOverride:         result.routingResult?.model                      ?? null,
+      reasoningLevel:        result.routingResult?.reasoning                  ?? "medium",
+      riskLevel:             result.routingResult?.risk                       ?? "medium",
+      routingEscalated:      result.routingResult?.escalated                  ?? false,
     },
   };
 }

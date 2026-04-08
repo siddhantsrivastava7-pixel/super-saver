@@ -101,6 +101,10 @@ async function main() {
       taskType:               result.taskType,
       sessionMode:            result.sessionStrategy?.sessionMode,
       strategyTriggeredReset: result.sessionStrategy?.contextStrategy?.triggerReset ?? false,
+      // Model router: persist selected model + weak output flag for next turn
+      modelUsed:              result.routingResult?.model       ?? "",
+      reasoningLevel:         result.routingResult?.reasoning   ?? "",
+      lastTurnFailed:         result.routingResult?.isWeak      ?? false,
     });
     saveMemory(memory);
   } catch {

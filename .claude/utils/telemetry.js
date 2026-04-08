@@ -105,6 +105,12 @@ function loadState() {
     output_tokens_analyzed:           0,   // total output tokens examined across turns
     output_tokens_redundant_estimated: 0,  // total estimated redundant output tokens
     output_waste_turns:               0,   // turns where waste was detected
+    // Model router
+    model_routing_low:                0,   // turns routed to low tier
+    model_routing_medium:             0,   // turns routed to medium tier
+    model_routing_high:               0,   // turns routed to high tier
+    model_escalations:                0,   // turns where escalation fired
+    model_mismatch_detected:          0,   // turns where weak output was detected
     session_started:                  new Date().toISOString(),
     last_updated:                     new Date().toISOString(),
   };
@@ -173,6 +179,7 @@ function recordTurn(fields) {
       proofStats     = {},
       toolStats        = {},
       outputWasteStats = {},
+      routingResult    = {},
     } = fields;
 
     // turnStats contains the per-turn deltas from savings.js.
@@ -263,6 +270,18 @@ function recordTurn(fields) {
       state.output_waste_turns = (state.output_waste_turns ?? 0) + 1;
     }
 
+    // Model router — routing tier distribution + escalation/mismatch counters
+    const routedTier = routingResult.tier ?? "medium";
+    if (routedTier === "low")       state.model_routing_low    = (state.model_routing_low    ?? 0) + 1;
+    else if (routedTier === "high") state.model_routing_high   = (state.model_routing_high   ?? 0) + 1;
+    else                            state.model_routing_medium = (state.model_routing_medium ?? 0) + 1;
+    if (routingResult.escalated) {
+      state.model_escalations = (state.model_escalations ?? 0) + 1;
+    }
+    if (routingResult.isWeak) {
+      state.model_mismatch_detected = (state.model_mismatch_detected ?? 0) + 1;
+    }
+
     state.last_updated = new Date().toISOString();
     saveState(state);
 
@@ -314,6 +333,12 @@ function getMetrics() {
       output_tokens_analyzed:             s.output_tokens_analyzed              ?? 0,
       output_tokens_redundant_estimated:  s.output_tokens_redundant_estimated   ?? 0,
       output_waste_turns:                 s.output_waste_turns                  ?? 0,
+      // Model router
+      model_routing_low:                  s.model_routing_low                   ?? 0,
+      model_routing_medium:               s.model_routing_medium                ?? 0,
+      model_routing_high:                 s.model_routing_high                  ?? 0,
+      model_escalations:                  s.model_escalations                   ?? 0,
+      model_mismatch_detected:            s.model_mismatch_detected             ?? 0,
       session_started:                    s.session_started,
       last_updated:                       s.last_updated,
     };

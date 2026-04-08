@@ -94,6 +94,10 @@ function defaultMemory() {
     last_task_type:      "default",
     // V5: Last session strategy mode — for telemetry/debugging
     last_session_mode:   "continuation",
+    // Model router: last selected model + reasoning, and weak output flag
+    last_model_used:      "",
+    last_reasoning_level: "",
+    last_turn_failed:     false,
     savings: {
       prompts_processed:            0,
       total_estimated_saved_tokens: 0,
@@ -236,6 +240,18 @@ function applyUpdates(mem, updates) {
   }
   if (updates.sessionMode) {
     mem.last_session_mode = updates.sessionMode;
+  }
+
+  // Model router: persist selected model + reasoning, and weak output flag.
+  // last_turn_failed drives escalation on the NEXT turn.
+  if (updates.modelUsed !== undefined) {
+    mem.last_model_used = updates.modelUsed;
+  }
+  if (updates.reasoningLevel !== undefined) {
+    mem.last_reasoning_level = updates.reasoningLevel;
+  }
+  if (updates.lastTurnFailed !== undefined) {
+    mem.last_turn_failed = updates.lastTurnFailed;
   }
 
   // V3: Smart memory — merge extracted MemoryItem[] into existing items with

@@ -7,7 +7,7 @@
   },
   "scripts": {
     "setup": "node setup.js",
-    "test": "node .claude/tests/compression-safety.js && node .claude/tests/file-inference.js && node .claude/tests/adapter-parity.js && node .claude/tests/cache-hit.js && node .claude/tests/lifecycle.js && node .claude/tests/savings-aggregation.js && node .claude/tests/smart-memory.js && node .claude/tests/proof-engine.js && node .claude/tests/tool-awareness.js && node .claude/tests/memory-decay.js && node .claude/tests/output-waste.js && node .claude/tests/session-strategy.js"
+    "test": "node .claude/tests/compression-safety.js && node .claude/tests/file-inference.js && node .claude/tests/adapter-parity.js && node .claude/tests/cache-hit.js && node .claude/tests/lifecycle.js && node .claude/tests/savings-aggregation.js && node .claude/tests/smart-memory.js && node .claude/tests/proof-engine.js && node .claude/tests/tool-awareness.js && node .claude/tests/memory-decay.js && node .claude/tests/output-waste.js && node .claude/tests/session-strategy.js && node .claude/tests/model-router.js"
   },
   "keywords": ["claude", "codex", "token", "optimization", "hook", "llm"],
   "license": "MIT",
