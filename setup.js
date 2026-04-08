@@ -85,6 +85,21 @@ try {
   fail(`Failed to copy .claude/: ${e.message}`);
 }
 
+// ─── Step 1b: Write .claude/package.json (CJS override) ──────────────────────
+// Projects with "type":"module" in their root package.json treat every .js
+// file as ESM, which breaks require() / module.exports used throughout .claude/.
+// A local package.json inside .claude/ scoped to "commonjs" fixes this for any
+// Node.js project regardless of the root module type setting.
+// Harmless on CJS projects (they already default to commonjs).
+
+try {
+  const claudePkgPath = path.join(claudeDest, "package.json");
+  fs.writeFileSync(claudePkgPath, JSON.stringify({ type: "commonjs" }, null, 2) + "\n", "utf-8");
+  ok(".claude/package.json written (CommonJS scope — fixes ESM project compat)");
+} catch (e) {
+  warn(`Could not write .claude/package.json: ${e.message} — may fail in "type:module" projects`);
+}
+
 // ─── Step 2: Merge settings.json hook ────────────────────────────────────────
 // Safe merge: reads existing settings, adds only the missing hook entry.
 // Never overwrites other settings or permissions the user has configured.
