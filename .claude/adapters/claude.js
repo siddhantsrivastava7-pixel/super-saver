@@ -66,12 +66,10 @@ function formatClaudeContext(result) {
     sections.push(`[SESSION MODE]\n${result.sessionStrategy.note}`);
   }
 
-  // Model suggestion — only when risk classification is confident (≥ 0.70).
-  // One line max. Only shown for LOW (cheaper option) or HIGH (stronger needed).
-  // MEDIUM tasks get no suggestion — current model is assumed appropriate.
-  if (result.routingResult?.suggestion) {
-    sections.push(`[MODEL SUGGESTION]\n${result.routingResult.suggestion}`);
-  }
+  // Model suggestion is suppressed for Claude Code: the hook protocol only
+  // allows additionalContext injection — it cannot change which model is used.
+  // Suggestions are meaningful only for the Codex adapter (model override in metadata).
+  // Risk classification still runs (for telemetry), but the hint is not injected.
 
   // Output waste feedback — injected when prior response had significant redundancy.
   // Kept to 3 lines so the feedback itself models terse output.

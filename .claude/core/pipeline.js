@@ -333,7 +333,8 @@ async function runPipeline({ prompt, transcriptPath, cwd, memory, currentTurn })
       outputWasteFeedback,
       retryBlock,
       verificationSuggestion,
-      routingResult.suggestion,
+      // routingResult.suggestion excluded: suppressed in Claude adapter,
+      // and Codex adapter puts it in metadata (not injected as context chars).
     ].filter(Boolean).reduce((sum, s) => sum + s.length, 0);
 
     updatedSavings = updateSavings(memory.savings, {

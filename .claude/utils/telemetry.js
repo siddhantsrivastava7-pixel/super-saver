@@ -244,14 +244,14 @@ function recordTurn(fields) {
     else if (lifecycleMode === "compact") state.lifecycle_compact_turns = (state.lifecycle_compact_turns ?? 0) + 1;
     else                                  state.lifecycle_normal_turns  = (state.lifecycle_normal_turns  ?? 0) + 1;
 
-    // V2: Proof engine — sync from latest session proof (not additive —
-    // these are derived fields that always reflect the latest computed values)
-    if (proofStats && typeof proofStats.estimated_total_tokens_without_optimizer === "number") {
-      state.estimated_total_tokens_without_optimizer = proofStats.estimated_total_tokens_without_optimizer;
-      state.estimated_total_tokens_with_optimizer    = proofStats.estimated_total_tokens_with_optimizer;
-      state.estimated_total_tokens_saved             = proofStats.estimated_total_tokens_saved;
-      state.estimated_efficiency_percent             = proofStats.estimated_efficiency_percent;
-    }
+    // V2: Proof engine — additive per-turn accumulation (cross-session honest totals).
+    // Previously synced from session proofStats, which resets each Claude Code session
+    // and caused efficiency to reflect only the current session (~96% from small denominator).
+    // Now uses turnProof (already computed above) which is correctly scoped per-turn.
+    // Efficiency is derived in getMetrics() from these accumulated totals — never stored.
+    state.estimated_total_tokens_without_optimizer += turnProof.without_tokens;
+    state.estimated_total_tokens_with_optimizer    += turnProof.with_tokens;
+    state.estimated_total_tokens_saved             += turnProof.saved_tokens;
 
     // V2: Tool tracker — additive per-turn accumulation
     state.tool_calls_estimate     += toolStats.tool_calls_estimate  ?? 0;
@@ -317,11 +317,16 @@ function getMetrics() {
       lifecycle_normal_turns:             s.lifecycle_normal_turns      ?? 0,
       lifecycle_compact_turns:            s.lifecycle_compact_turns     ?? 0,
       lifecycle_rebuild_turns:            s.lifecycle_rebuild_turns     ?? 0,
-      // V2: Proof engine
+      // V2: Proof engine — totals accumulated additively, efficiency derived here
       estimated_total_tokens_without_optimizer: s.estimated_total_tokens_without_optimizer ?? 0,
       estimated_total_tokens_with_optimizer:    s.estimated_total_tokens_with_optimizer    ?? 0,
       estimated_total_tokens_saved:             s.estimated_total_tokens_saved             ?? 0,
-      estimated_efficiency_percent:             s.estimated_efficiency_percent             ?? 0,
+      estimated_efficiency_percent: (s.estimated_total_tokens_without_optimizer ?? 0) > 0
+        ? Math.round(
+            ((s.estimated_total_tokens_saved ?? 0) /
+             (s.estimated_total_tokens_without_optimizer ?? 1)) * 100
+          )
+        : 0,
       // V2: Tool tracker
       tool_calls_estimate:                s.tool_calls_estimate         ?? 0,
       file_reads_estimate:                s.file_reads_estimate         ?? 0,
