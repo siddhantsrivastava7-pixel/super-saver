@@ -1,6 +1,8 @@
 # 🚀 SUPER SAVER v5
 
-### Save **50–70% tokens** in Claude Code — automatically
+### Save **50–70% tokens** in Claude Code and Codex exec mode — automatically
+
+> Works perfectly with Claude Code and Codex exec mode — where each task is optimized independently for maximum efficiency.
 
 > Install once. Keep working normally. No new commands.
 
@@ -111,6 +113,22 @@ Restart Claude Code → done.
 ```bash
 npx github:siddhantsrivastava7-pixel/super-saver --codex
 ```
+
+Works perfectly with Claude Code and Codex exec mode — where each task is optimized independently for maximum efficiency.
+
+---
+
+## ⚠️ Codex usage note
+
+Super Saver works best in **exec mode**:
+
+```bash
+npm run ai "your task"
+```
+
+Why? Because each task runs through the full optimization pipeline.
+
+In interactive chat mode, optimization applies only at session start due to Codex architecture.
 
 ---
 
@@ -303,6 +321,8 @@ New task detected — execution history cleared. Project constraints preserved.
     codex.js            # Codex CLI output layer
   hooks/
     beforePrompt.js     # UserPromptSubmit entrypoint
+  codex-wrapper.js      # drop-in Codex CLI wrapper (npm run ai)
+  terminal.js           # unified AI terminal — auto-routes to Claude or Codex
   utils/
     sessionStrategy.js  # v5: 5-mode session strategy engine
     outputWaste.js      # v4: post-response redundancy analyzer
@@ -328,6 +348,8 @@ New task detected — execution history cleared. Project constraints preserved.
 * Your original prompt is untouched
 * Everything runs automatically
 * Works across session gaps and restarts
+* Works perfectly with Claude Code and Codex exec mode — where each task is optimized independently for maximum efficiency
+* In Codex interactive chat mode, optimization applies only at session start due to Codex architecture — use `npm run ai "your task"` (exec mode) for full per-turn optimization
 
 ---
 
@@ -337,11 +359,12 @@ New task detected — execution history cleared. Project constraints preserved.
 npm test
 ```
 
-395+ tests across 12 suites — all should pass.
+496+ tests across 13 suites — all should pass.
 
 Or run individual suites:
 
 ```bash
+node .claude/tests/model-router.js       # 48 tests — risk classification + model routing
 node .claude/tests/session-strategy.js  # 77 tests — 5-mode strategy engine
 node .claude/tests/output-waste.js      # 60 tests — redundancy detection
 node .claude/tests/memory-decay.js      # 72 tests — confidence decay + supersede
