@@ -156,12 +156,20 @@ try {
     try { pkg = JSON.parse(fs.readFileSync(targetPkgPath, "utf-8")); } catch {}
   }
   pkg.scripts ??= {};
-  if (pkg.scripts.ai) {
-    ok(`npm "ai" script already present — no change`);
-  } else {
-    pkg.scripts.ai = "node .claude/codex-wrapper.js";
+  let changed = false;
+  if (!pkg.scripts.ai) {
+    pkg.scripts.ai   = "node .claude/codex-wrapper.js";
+    changed = true;
+  }
+  if (!pkg.scripts.chat) {
+    pkg.scripts.chat = "node .claude/terminal.js";
+    changed = true;
+  }
+  if (changed) {
     fs.writeFileSync(targetPkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
-    ok(`npm "ai" script added → use: npm run ai "your prompt"`);
+    ok(`npm scripts added → "ai" (codex wrapper) and "chat" (unified terminal)`);
+  } else {
+    ok(`npm scripts already present — no change`);
   }
 } catch (e) {
   warn(`Could not add npm script: ${e.message} — add manually: "ai": "node .claude/codex-wrapper.js"`);
